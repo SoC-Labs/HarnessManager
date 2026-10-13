@@ -13,6 +13,9 @@ Connections say it in one word:
 - ``none``: no route to the MCC (Ethernet only);
 - ``unknown``: a board that is not open and whose links do not say (only in ``GET /boards``).
 
+ONE selection policy decides between them (``prefer``): the harness's own route when the image
+advertises it (works with no USB cable), else the Debug USB on this machine, else the hub.
+
 ``mcc_route_reason`` says it in a sentence. Nothing here contacts the board or the hub: an open
 board is judged from its session (its controller adapter and links, and the harness's MCC
 route as last read), any other from its candidate's links.
@@ -43,6 +46,24 @@ _LANE = re.compile(r"\bif0[1-3]\b")
 HARNESS_MCC_FEATURES = ("mccif", "mcc_local", "mcc")
 
 
+#: ``prefer``'s answers: where an MCC act goes.
+PREFER_HARNESS, PREFER_USB, PREFER_HUB, PREFER_NONE = "harness", "usb", "hub", "none"
+
+
+def prefer(act: str, *, harness_serves: bool, has_usb: bool, has_hub: bool) -> str:
+    """THE selection policy (one place; ``harness_manager_mps3.mcc.make_controller_adapter``,
+    ``of_session`` and the Recover page's rungs all follow it): the harness's own route when
+    the image advertises ``mccif``/``mcc_local`` and the route serves ``act`` (it needs no USB
+    cable), else the Debug USB on this machine, else the hub, else nowhere."""
+    if harness_serves:
+        return PREFER_HARNESS
+    if has_usb:
+        return PREFER_USB
+    if has_hub:
+        return PREFER_HUB
+    return PREFER_NONE
+
+
 def _hub_of(address: str) -> str:
     rest = address[len(HUB_MCC_SCHEME):]
     return rest.split("/", 1)[0]
@@ -66,15 +87,16 @@ def from_links(links: Any, features: Any = ()) -> tuple[str, str]:
     """``(route, reason)`` for a board that is not open: from its candidate's links (and the
     features its probe read), never a contact. ``unknown`` when they do not say."""
     hub, serial = _mcc_links(links)
-    if hub:
-        return HUB, (f"the Debug USB goes to the hub {hub}: the MCC is reached there "
-                     "(its reads and REBOOT run on the hub)")
-    if serial:
-        return PC, f"the Debug USB is on this machine: the MCC console is {serial}"
     feats = [f for f in HARNESS_MCC_FEATURES if f in tuple(features or ())]
-    if feats:
+    kind = prefer("osc", harness_serves=bool(feats), has_usb=bool(serial), has_hub=bool(hub))
+    if kind == PREFER_HARNESS:
         return SELF, (f"the harness reaches the MCC itself (feature {feats[0]!r}); its route "
                       "is read when the board is open")
+    if kind == PREFER_HUB:
+        return HUB, (f"the Debug USB goes to the hub {hub}: the MCC is reached there "
+                     "(its reads and REBOOT run on the hub)")
+    if kind == PREFER_USB:
+        return PC, f"the Debug USB is on this machine: the MCC console is {serial}"
     return UNKNOWN, "not known until the board is opened"
 
 
@@ -102,22 +124,24 @@ def of_session(session: Any, identity: Any = None) -> tuple[str, str]:
         controller = getattr(session, "controller", None)
     except HarnessError:
         controller = None
-    if hub:
-        return HUB, (f"the Debug USB goes to the hub {hub}: the MCC is reached there (its reads "
-                     "and REBOOT run on the hub, one reader on tty_00)")
-    if controller is not None and serial:
-        return PC, f"the Debug USB is on this machine: the MCC console is {serial}"
     feats = tuple(getattr(identity, "features", ()) or ())
     have = [f for f in HARNESS_MCC_FEATURES if f in feats]
-    if have:
-        route = _harness_route(session)
-        if route == "none":
-            return NONE, ("the harness reports no route to the MCC (`mcc status`: none: no "
-                          "in-fabric SCC in this static, and no USB loopback cable)")
+    route = _harness_route(session) if have else ""
+    kind = prefer("osc", harness_serves=bool(have) and route != "none",
+                  has_usb=controller is not None and bool(serial), has_hub=bool(hub))
+    if kind == PREFER_HARNESS:
         how = {"loopback": "the Debug USB loops back into the board's own USB host",
                "scc": "the harness reaches the MCC in fabric (the SCC)"}.get(
             route, f"the harness reaches the MCC itself (feature {have[0]!r})")
         return SELF, how + ("" if route else "; its route is read when needed")
-    if controller is not None:
+    if kind == PREFER_HUB:
+        return HUB, (f"the Debug USB goes to the hub {hub}: the MCC is reached there (its reads "
+                     "and REBOOT run on the hub, one reader on tty_00)")
+    if kind == PREFER_USB:
+        return PC, f"the Debug USB is on this machine: the MCC console is {serial}"
+    if have:
+        return NONE, ("the harness reports no route to the MCC (`mcc status`: none: no "
+                      "in-fabric SCC in this static, and no USB loopback cable)")
+    if controller is not None and getattr(controller, "has_fallback", True):
         return PC, "the board controller is reached from this machine"
     return NONE, "no Debug USB here or on a hub: Ethernet only (no MCC console, config SD or REBOOT)"

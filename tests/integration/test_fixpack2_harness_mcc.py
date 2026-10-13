@@ -87,13 +87,11 @@ def open_board(tmp_path):
         fake.stop()
 
 
-def test_loopback_route_reboot_and_osc_are_pending_v018(open_board):
+def test_loopback_route_offers_reboot_and_osc_through_the_harness(open_board):
     fake, eng, session, bid = open_board(("mcc_local",), route="loopback")
     info = eng.info(bid)
-    assert C.REBOOT_BOARD not in info.capabilities and C.CLOCK_BOARD not in info.capabilities
-    assert "pending v0.18" in info.unavailable[C.REBOOT_BOARD]
-    assert "(loopback)" in info.unavailable[C.REBOOT_BOARD]
-    assert "pending v0.18" in info.unavailable[C.CLOCK_BOARD]
+    assert {C.REBOOT_BOARD, C.CLOCK_BOARD} <= info.capabilities       # L5b: both are driven now
+    assert C.REBOOT_BOARD not in info.unavailable and C.CLOCK_BOARD not in info.unavailable
     eng.info(bid)                                            # inside the TTL: not asked again
     assert fake.mcc_requests == [ACT_STATUS]                 # status only: nothing else is sent
     assert session.harness_mcc.route() == "loopback"
@@ -104,7 +102,7 @@ def test_scc_route_cannot_reboot_the_board_and_says_which_route_can(open_board):
     info = eng.info(bid)
     why = info.unavailable[C.REBOOT_BOARD]
     assert "USB loopback route (feature 'mcc_local')" in why and "route scc" in why
-    assert "pending v0.18" in info.unavailable[C.CLOCK_BOARD]   # osc: scc serves it, HM not yet
+    assert C.CLOCK_BOARD in info.capabilities                # osc is served by the scc route
     assert fake.mcc_requests == [ACT_STATUS]
 
 
@@ -140,7 +138,7 @@ def test_negative_twin_the_debug_usb_route_wins_and_the_harness_is_not_asked(ope
     assert fake.mcc_requests == []
 
 
-# --- the acts: status is read, reboot and osc_set are pending --------------------------------------
+# --- the acts: status is read; the rest are driven (L5b) ---------------------------------------
 
 
 def test_mcc_status_reads_the_route_from_the_fake(open_board):
@@ -150,21 +148,23 @@ def test_mcc_status_reads_the_route_from_the_fake(open_board):
     assert st.raw["op"] == "mcc" and fake.mcc_requests == [ACT_STATUS]
 
 
-@pytest.mark.parametrize(("call", "what"), [("reboot", "rebooting"), ("set_osc", "setting"),
-                                            ("oscillators", "reading the board osc"),
-                                            ("temperatures", "temperature")])
-def test_reboot_and_osc_set_over_the_harness_are_pending_and_send_nothing(open_board, call, what):
-    fake, eng, session, bid = open_board(("mcc_local",), route="loopback")
-    with pytest.raises(UnavailableError) as exc:
-        getattr(session.harness_mcc, call)()
-    assert "pending v0.18" in exc.value.reason and what in exc.value.reason
-    assert fake.mcc_requests == []
+def test_oscillator_reads_go_over_the_harness_and_a_protected_set_is_never_sent(open_board):
+    from harness_manager.core.errors import RefusedError
+
+    fake, eng, session, bid = open_board(("mccif",), route="scc")
+    readings = session.harness_mcc.oscillators()
+    # this 1.1-era fake models only `status`, so every osc read comes back unavailable with
+    # its reason; what matters is the eight `osc` requests, one per device 0..7
+    assert [r.available for r in readings] == [False] * 8
+    assert [(m["act"], m["dev"]) for m in fake.mcc_requests] == [("osc", d) for d in range(8)]
+    n = len(fake.mcc_requests)
+    with pytest.raises(RefusedError):
+        session.harness_mcc.set_osc(1, 40_000_000)           # the harness's own clock
+    assert len(fake.mcc_requests) == n
 
 
-def test_the_cli_and_api_require_says_pending_not_no_adapter(open_board):
+def test_the_cli_and_api_require_gets_the_routed_controller_with_no_usb(open_board):
     fake, eng, session, bid = open_board(("mcc_local",), route="loopback")
-    assert session.controller is None                         # no Debug USB, no hub
+    assert session.controller is not None and not session.controller.has_fallback
     ctx = Ctx(argparse.Namespace(), eng, "json")
-    with pytest.raises(UnavailableError) as exc:
-        ctx.require(session, "controller", C.REBOOT_BOARD)
-    assert "pending v0.18" in exc.value.reason
+    assert ctx.require(session, "controller", C.REBOOT_BOARD) is session.controller

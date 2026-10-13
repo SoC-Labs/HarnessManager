@@ -1131,7 +1131,33 @@ def _shell_probe_for(shell: Any, timeout: float) -> ShellProbe:
 
 
 def make_controller_adapter(session: Any) -> Any:
-    """The ``pack.py`` hook: the MCC over the local Debug USB, else ON the hub, else ``None``.
+    """The ``pack.py`` hook: the session's controller. ONE selection policy
+    (``daemon.mcc_route.prefer``): the harness's own MCC route when the image advertises
+    ``mccif``/``mcc_local`` (no USB cable needed), else the Debug USB, else the hub.
+
+    The USB/hub controller (``_usb_or_hub_controller``, possibly ``None``) is wrapped in a
+    ``harness_mcc.RoutedController`` when the board's probe listed a harness MCC feature, so
+    the choice is made per act, when the route is known. A board whose image lists none gets
+    the USB/hub controller exactly as before (or ``None``)."""
+    from .harness_mcc import RoutedController, recognise
+
+    fallback = _usb_or_hub_controller(session)
+    ident = getattr(getattr(session, "candidate", None), "identity", None)
+    feats = tuple(getattr(ident, "features", ()) or ())
+    if not feats and getattr(session, "shell", None) is not None:
+        # The probe listed no features (a board opened by address): one `version` read says
+        # whether the image reaches the MCC itself. An unreachable board keeps what it had.
+        try:
+            feats = tuple(getattr(session.identity(), "features", ()) or ())
+        except Exception:  # noqa: BLE001 - never fail a session open over a feature read
+            feats = ()
+    if recognise(feats) is None:
+        return fallback
+    return RoutedController(session, fallback)
+
+
+def _usb_or_hub_controller(session: Any) -> Any:
+    """The MCC over the local Debug USB, else ON the hub, else ``None``.
 
     The MCC link is the first ``USB_SERIAL`` link that is not an FT4232H FPGA
     lane (``usb.probe_usb`` lists the MCC first). A candidate with only lane
