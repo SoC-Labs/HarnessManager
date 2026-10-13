@@ -14,6 +14,12 @@ window differs. The launcher tries, in order:
    Edge ships with Windows, so this needs nothing extra there;
 4. the default browser, in a tab (Firefox has no app mode).
 
+The window has an identity on the taskbar: on Windows the process sets the same
+AppUserModelID as the Start menu shortcut (``scripts/install.ps1``); on Linux the window
+class is ``harness-manager``, which is the ``StartupWMClass`` of the ``.desktop`` file
+(the Chromium app window gets it from ``--class``); on macOS the Dock icon is set from the
+installed icon. Every step is best effort: a failure never stops the window opening.
+
 Closing the window leaves harness-manager-daemon running, because the CLI shares it.
 ``harness-manager daemon stop`` stops it.
 
@@ -27,6 +33,7 @@ nothing on that bus. ``HARNESS_MANAGER_APP_KEEP_DBUS=1`` keeps the bus.
 
 from __future__ import annotations
 
+import inspect
 import os
 import shutil
 import subprocess
@@ -38,7 +45,12 @@ from pathlib import Path
 
 ENV_APP_BROWSER = "HARNESS_MANAGER_APP_BROWSER"
 ENV_KEEP_DBUS = "HARNESS_MANAGER_APP_KEEP_DBUS"
+ENV_ICON = "HARNESS_MANAGER_ICON"
 TITLE = "Harness Manager"
+#: The taskbar identity. scripts/install.ps1 stamps the same string on the Start menu shortcut.
+APP_USER_MODEL_ID = "uk.ac.soton.soclabs.harness-manager"
+#: The window class: the .desktop file's StartupWMClass.
+WM_CLASS = "harness-manager"
 WINDOW_SIZE = (1440, 900)
 
 #: Chromium-family executables on PATH, most common first.
@@ -125,6 +137,85 @@ def pywebview_backend_missing() -> str | None:
     return "pywebview has no GTK or Qt bindings here"
 
 
+def set_app_user_model_id(platform: str | None = None, shell32: object | None = None) -> bool:
+    """Windows only: give this process the app's AppUserModelID, so the taskbar shows the
+    Harness Manager icon and groups the window with the Start menu shortcut, not with
+    python.exe. True when it was set; False elsewhere or on any failure."""
+    if (platform or sys.platform) != "win32":
+        return False
+    try:
+        if shell32 is None:
+            import ctypes
+
+            shell32 = ctypes.windll.shell32  # type: ignore[attr-defined]
+        result = shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)  # type: ignore[attr-defined]
+        return not result            # an HRESULT: 0 is S_OK
+    except Exception:  # noqa: BLE001 - never worth failing to open the window
+        return False
+
+
+def find_icon(platform: str | None = None) -> Path | None:
+    """The window icon: ``$HARNESS_MANAGER_ICON``, else the one the installer put in the
+    install root, else the checkout's built icons. ``.ico`` on Windows, ``.png`` elsewhere."""
+    plat = platform or sys.platform
+    ext = ".ico" if plat == "win32" else ".png"
+    names = [f"harness-manager{ext}"]
+    roots: list[Path] = []
+    named = os.environ.get(ENV_ICON, "").strip()
+    if named:
+        return Path(named) if Path(named).is_file() else None
+    home = os.environ.get("HARNESS_MANAGER_HOME", "").strip()
+    if home:
+        roots.append(Path(home) / "icon")
+    elif plat == "win32" and os.environ.get("LOCALAPPDATA"):
+        roots.append(Path(os.environ["LOCALAPPDATA"]) / "harness-manager" / "icon")
+    else:
+        data = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+        roots.append(Path(data) / "harness-manager" / "icon")
+    build = Path(__file__).resolve().parents[3] / "packaging" / "icon" / "build"
+    roots += [build, build / "hicolor" / "256x256" / "apps"]
+    for root in roots:
+        for name in names:
+            if (root / name).is_file():
+                return root / name
+    return None
+
+
+def _prepare_identity(icon: Path | None) -> None:
+    """Best-effort taskbar identity for the pywebview window (see the module docstring)."""
+    set_app_user_model_id()
+    if sys.platform.startswith("linux"):
+        try:
+            sys.argv[0] = WM_CLASS                       # Qt derives the window class from it
+            from gi.repository import GLib  # type: ignore[import-not-found]
+
+            GLib.set_prgname(WM_CLASS)                   # GTK derives it from the program name
+            GLib.set_application_name(TITLE)
+        except Exception:  # noqa: BLE001 - no GTK here (Qt, or neither)
+            pass
+    elif sys.platform == "darwin" and icon is not None:
+        try:
+            from AppKit import NSApplication, NSImage  # type: ignore[import-not-found]
+
+            image = NSImage.alloc().initWithContentsOfFile_(str(icon))
+            if image is not None:
+                NSApplication.sharedApplication().setApplicationIconImage_(image)
+        except Exception:  # noqa: BLE001 - no pyobjc: the bundle's icon still shows
+            pass
+
+
+def _start_kwargs(webview: object, icon: Path | None) -> dict[str, object]:
+    """``icon=`` for ``webview.start()`` when this pywebview takes it (GTK and Qt do)."""
+    if icon is None or icon.suffix != ".png":
+        return {}
+    try:
+        if "icon" in inspect.signature(webview.start).parameters:  # type: ignore[attr-defined]
+            return {"icon": str(icon)}
+    except (TypeError, ValueError):
+        pass
+    return {}
+
+
 def _try_pywebview(url: str) -> Launched | None:
     try:
         import webview  # type: ignore[import-not-found]
@@ -134,8 +225,10 @@ def _try_pywebview(url: str) -> Launched | None:
     if missing:
         return Launched("none", missing)
     try:
+        icon = find_icon()
+        _prepare_identity(icon)
         webview.create_window(TITLE, url, width=WINDOW_SIZE[0], height=WINDOW_SIZE[1])
-        webview.start()                      # blocks until the window closes
+        webview.start(**_start_kwargs(webview, icon))   # blocks until the window closes
     except Exception as exc:  # noqa: BLE001 - no GUI backend: fall back to app mode
         return Launched("none", f"pywebview could not open a window: {exc}")
     return Launched("pywebview", "native window (closed)")
@@ -181,5 +274,5 @@ def describe(launched: Launched) -> str:
 
 
 __all__: Sequence[str] = ("ENV_APP_BROWSER", "ENV_KEEP_DBUS", "Launched", "app_mode_args",
-                          "app_mode_env", "describe",
-                          "find_app_browser", "open_window")
+                          "app_mode_env", "describe", "find_app_browser", "find_icon",
+                          "open_window", "set_app_user_model_id")

@@ -244,10 +244,67 @@ function Get-UserPath {
     return $p
 }
 
+# The taskbar groups windows by AppUserModelID. The shortcut and the process
+# (harness_manager/web/window.py APP_USER_MODEL_ID) carry the same one, so the pinned
+# shortcut and the running window are one taskbar button with the Harness Manager icon.
+$AppUserModelId = 'uk.ac.soton.soclabs.harness-manager'
+$IconDir = Join-Path $Root 'icon'
+
+# Stamp System.AppUserModel.ID on a .lnk (IPropertyStore; PowerShell has no cmdlet for it).
+function Set-ShortcutAppId([string]$Path, [string]$Id) {
+    Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class HmShortcutAppId {
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    struct PropertyKey { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Explicit)]
+    struct PropVariant {
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(8)] public IntPtr pointerValue;
+    }
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPropertyStore {
+        void GetCount(out uint count);
+        void GetAt(uint index, out PropertyKey key);
+        void GetValue(ref PropertyKey key, out PropVariant value);
+        void SetValue(ref PropertyKey key, ref PropVariant value);
+        void Commit();
+    }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+    static extern void SHGetPropertyStoreFromParsingName(string path, IntPtr bc, int flags,
+        ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+    public static void Set(string path, string id) {
+        Guid iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+        IPropertyStore store;
+        SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, 2, ref iid, out store);   // GPS_READWRITE
+        PropertyKey key = new PropertyKey();
+        key.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+        key.pid = 5;                                                                      // PKEY_AppUserModel_ID
+        PropVariant v = new PropVariant();
+        v.vt = 31;                                                                        // VT_LPWSTR
+        v.pointerValue = Marshal.StringToCoTaskMemUni(id);
+        store.SetValue(ref key, ref v);
+        store.Commit();
+        Marshal.FreeCoTaskMem(v.pointerValue);
+    }
+}
+'@
+    [HmShortcutAppId]::Set($Path, $Id)
+}
+
 # The Start menu entry runs "harness-manager app" (the window; the service starts with it).
 function Set-StartMenuEntry([string]$Target) {
     if (-not $OnWindows -or -not $StartMenuLink) { return }
     try {
+        $ico = ''
+        $built = Join-Path $Checkout 'packaging\icon\build\harness-manager.ico'
+        if (Test-Path $built) {
+            New-Item -ItemType Directory -Force -Path $IconDir | Out-Null
+            $ico = Join-Path $IconDir 'harness-manager.ico'
+            Copy-Item -Force $built $ico
+        }
+
         New-Item -ItemType Directory -Force -Path $StartMenuDir | Out-Null
         $shell = New-Object -ComObject WScript.Shell
         $lnk = $shell.CreateShortcut($StartMenuLink)
@@ -256,7 +313,13 @@ function Set-StartMenuEntry([string]$Target) {
         $lnk.WorkingDirectory = $HOME
         $lnk.WindowStyle = 7         # the console starts minimised; the app opens its own window
         $lnk.Description = 'SoC Labs Harness Manager: bring up and use MPS3 boards'
+        if ($ico) { $lnk.IconLocation = "$ico,0" }
         $lnk.Save()
+        try {
+            Set-ShortcutAppId $StartMenuLink $AppUserModelId
+        } catch {
+            Note "the Start menu entry has no taskbar identity ($($_.Exception.Message)); it still works"
+        }
         Say "menu     $StartMenuLink"
     } catch {
         Note "could not add Harness Manager to the Start menu ($($_.Exception.Message)); run 'harness-manager app' instead"
@@ -268,6 +331,7 @@ function Remove-StartMenuEntry {
         Remove-Item -Force $StartMenuLink
         Say "removed  $StartMenuLink"
     }
+    if (Test-Path $IconDir) { Remove-Item -Recurse -Force $IconDir }
 }
 
 function Test-OnPath([string]$PathList, [string]$Dir) {

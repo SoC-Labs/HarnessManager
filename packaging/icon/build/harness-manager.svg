@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- A: the MPS3 board seen from above: a white PCB on the brand-blue tile, the FPGA package in the middle, one status LED. -->
+  <defs><linearGradient id="t" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a68e0"/><stop offset="1" stop-color="#2450bf"/></linearGradient></defs>
+  <rect width="256" height="256" rx="56" fill="url(#t)"/>
+  <rect x="34" y="52" width="188" height="152" rx="16" fill="#ffffff"/>
+  <rect x="58" y="76" width="104" height="104" rx="12" fill="#2f5bd3"/>
+  <rect x="80" y="98" width="60" height="60" rx="6" fill="#ffffff"/>
+  <g fill="#2f5bd3"><rect x="180" y="72" width="26" height="14" rx="4"/><rect x="180" y="96" width="26" height="14" rx="4"/><rect x="180" y="120" width="26" height="14" rx="4"/></g>
+  <circle cx="193" cy="170" r="14" fill="#1fb86a"/>
+</svg>
