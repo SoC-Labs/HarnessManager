@@ -4,6 +4,8 @@
 | Method and path | Returns |
 |---|---|
 | ``GET /boards/{bid}/readings/history?name=&since=&limit=`` | ``{board_id, series: [{name, unit, source, points: [[at, value]]}], spacing_s, capacity, oldest}`` |
+| ``GET /boards/{bid}/sensors`` | ``{board_id, sensors}``: the harness's ``sensors`` body (mint 4, feature ``sysmon``): ``ref, k, cal, temp_c, temp_raw_c, temp_max_c, temp_min_c, vccint_v, vccaux_v, vccbram_v, touch_temp_c, alm, thr`` plus ``alarms`` (the latched bits in words) and ``calibrated``. 422 UNAVAILABLE with the reason on a board without the sensors |
+| ``POST /boards/{bid}/sensors`` ``{act: "set", temp_hi_c?, temp_ot_c?, vccint_lo_v?, vccint_hi_v?, k?}`` or ``{act: "clear_alm"}`` | ``{board_id, act, sensors}`` (``sensors.persisted`` on ``set``). CLAIM-LOCKED: goes through the claim forward; 409 REFUSED with the lock's words when the claim is not this Harness Manager's. 400 USAGE (nothing sent) for a value out of range |
 
 and the additive keys of ``GET /boards/{bid}`` (``answer_ms``, ``uptime_s``, ``os_uptime_s``,
 ``readings_at``, ``readings_source``, ``stats``). ``services.history`` does the work; this
@@ -23,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from harness_manager.core.errors import HarnessError
+from harness_manager.core.errors import HarnessError, UnavailableError, UsageError
 from harness_manager.services.history import (
     ReadingsHistory,
     facts_of,
@@ -31,7 +33,7 @@ from harness_manager.services.history import (
     query_args,
 )
 
-from .app import _JSON, RouteContext, ok
+from .app import _JSON, JsonBody, RouteContext, _obj, ok
 
 
 def history_of(daemon: Any) -> ReadingsHistory:
@@ -78,3 +80,30 @@ def register(ctx: RouteContext) -> None:
                          limit: str | None = None) -> Any:
         names, when, count = query_args(name, since, limit, hist.capacity)
         return _JSON(ok(**hist.history(bid, names=names, since=when, limit=count)))
+
+    def sensors_of(bid: str) -> Any:
+        """The pack's telemetry adapter when it serves ``sensors`` (an optional extra)."""
+        adapter = getattr(ctx.board(bid), "telemetry", None)
+        if adapter is None or not callable(getattr(adapter, "sensors_get", None)):
+            raise UnavailableError("sensors", "this board's pack has no temperature and voltage "
+                                              "sensors")
+        return adapter
+
+    @ctx.api.get("/boards/{bid:path}/sensors")
+    def sensors_get(bid: str) -> Any:
+        adapter = sensors_of(bid)
+        with d.gates.op(bid):
+            body = adapter.sensors_get()
+        return _JSON(ok(board_id=bid, sensors=body))
+
+    @ctx.api.post("/boards/{bid:path}/sensors")
+    def sensors_act(bid: str, body: JsonBody = None) -> Any:
+        b = _obj(body)
+        act = b.get("act")
+        if act not in ("set", "clear_alm"):
+            raise UsageError("act must be set or clear_alm")
+        fields = {k: v for k, v in b.items() if k != "act"}
+        adapter = sensors_of(bid)
+        with d.gates.op(bid):
+            out = adapter.sensors_act(act, fields)
+        return _JSON(ok(board_id=bid, act=act, sensors=out))
