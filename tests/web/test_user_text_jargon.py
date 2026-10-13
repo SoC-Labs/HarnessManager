@@ -59,9 +59,31 @@ def test_no_internal_names_in_user_visible_strings():
 def test_negative_twin_the_scanner_catches_the_old_texts():
     for old in ("comes with Linux v2.1 (HARNESS-DIST L3)",
                 "the build kit arrived with lane KIT-CORE",
-                "Until mint 4, stage0 rescue",
+                "Until mint 4, rescue mode",
                 "it predates FIX-PACK-9", "harness Lane C adds it", "(CCR T7-2)"):
         assert JARGON.search(old), old
     assert not JARGON.search("FPGA UART lane 2 (hard-wired)")
     assert list(js_strings('// a HARNESS-DIST comment\nconst a = "fine";')) == ['"fine"']
     assert js_strings and list(js_strings('x = "lane KIT-CORE"')) != []
+
+
+# L11 WORDS: words taken out of what a user reads (kept out by this list).
+REMOVED = re.compile(
+    r"stage0 RESCUE|stage0 rescue|To greybox|Back to greybox|harness firmware|harness image"
+    r"|Harness \+ kits|mapstone-dev\.ecs|Release lease|Acquire lease|Force release|Release now")
+REMOVED_JS_ONLY = re.compile(r"harness-manager-daemon|rm_id (in|not|and|back|read)|name or rm_id")
+
+
+def removed_offenders():
+    out = []
+    for p in sorted(SRC.rglob("*")):
+        if "checks" in p.parts or p.name == "demo_showcase.py" or p.suffix not in (".js", ".py"):
+            continue
+        strings = js_strings(p.read_text()) if p.suffix == ".js" else py_strings(p.read_text())
+        rx = [REMOVED] + ([REMOVED_JS_ONLY] if p.suffix == ".js" else [])
+        out += [f"{p.relative_to(SRC)}: {s[:90]!r}" for s in strings if any(r.search(s) for r in rx)]
+    return out
+
+
+def test_removed_words_stay_out_of_user_text():
+    assert removed_offenders() == []

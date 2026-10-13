@@ -249,7 +249,7 @@ function EthLine({ eth }) {
   if (!eth) return html`<span class="muted">not paired (more than one board on USB)</span>`;
   const level = eth.state === "running" ? "ok" : eth.state === "rescue" ? "warn" : "";
   return html`<span class="line"><${Chip} level=${level} icon=${eth.state === "none" ? "circle-dashed" : "ethernet-port"}
-      testid="usb-eth">${eth.state === "running" ? "harness answers" : eth.state === "rescue" ? "stage0 rescue" : "nothing answers"}<//></span>
+      testid="usb-eth">${eth.state === "running" ? "harness answers" : eth.state === "rescue" ? "Rescue mode" : "nothing answers"}<//></span>
     <div class="sub">${eth.text}</div>
     <${NetCheck} found=${eth.network} testid="usb-netcheck" />`;
 }
@@ -447,7 +447,7 @@ function BundleSource({ bid, w }) {
       <button type="button" class="btn sm" data-action="bundle-check" disabled=${!w.path.trim() || w.checking}
         aria-busy=${w.checking ? "true" : undefined} onClick=${() => checkBundle(bid)}>
         ${w.checking ? html`<${Spinner} />` : html`<${Icon} name="list-checks" />`} Check</button></div>
-    <p class="small muted">A path on the machine running harness-manager-daemon: the config-SD tree (config.txt and MB/), a release bundle (the folder with config-sd/, overlays/ and linux_bundle.json), or a zip of either. Never an .ebf.</p>
+    <p class="small muted">A path on the computer running the background service: the config-SD tree (config.txt and MB/), a release bundle (the folder with config-sd/, overlays/ and linux_bundle.json), or a zip of either. Never an .ebf.</p>
     ${examples.length ? html`<div class="bu-examples small" data-testid="bundle-examples"><span class="muted">In this demo:</span>
       ${examples.map((x) => html`<button type="button" key=${x.path} class="link-btn" title=${x.path}
         onClick=${() => { w.path = x.path; changed(); checkBundle(bid); }}>${x.what}</button>`)}</div>` : null}
@@ -874,7 +874,7 @@ export const CARD_HINT = "a whole-card image (.img built with stage0_mkcard.py c
 export function cardImageWhy(path) {
   const p = String(path || "").trim();
   if (!p) return "give the whole-card image's path";
-  if (!/^(\/|[A-Za-z]:[\\/])/.test(p)) return "an absolute path on the machine running harness-manager-daemon";
+  if (!/^(\/|[A-Za-z]:[\\/])/.test(p)) return "an absolute path on the computer running the background service";
   const name = p.split(/[\\/]/).pop().toLowerCase();
   if (name === "linux_slot.img") return "linux_slot.img is a SLOT image: written at byte 0 the card never boots. Give the whole-card image (stage0_mkcard.py card --card-img)";
   if (!name.endsWith(".img")) return "a whole-card image is an .img file";
@@ -943,11 +943,11 @@ function OsStep({ bid, w }) {
   const opts = [
     { value: "reader", label: "Write the board's user microSD with a whole-card image, in this PC's card reader", why: choice.ok ? "" : choice.why },
     { value: "network", label: "Over the network from rescue", why: (st.rescue_network && st.rescue_network.reason) || NETWORK_OS_REASON,
-      note: (st.rescue_network && st.rescue_network.note) || "stage0 rescue boots an image from RAM; it does not write the card" },
+      note: (st.rescue_network && st.rescue_network.note) || "Rescue mode boots a release from RAM; it does not write the card" },
     { value: "skip", label: "The card is already prepared: skip", why: "" },
   ];
   return html`<${Step} n="5" title="Linux OS image: the user microSD" state=${w.osDone ? "done" : ""} testid="bu-step-os">
-    <p class="small secondary">${rescue ? "The board answers in stage0 RESCUE: its user microSD has no bootable OS slot yet." : "A Linux harness boots its OS from the user microSD (slot A/B). A card with no bootable slot leaves the board in stage0 RESCUE."}</p>
+    <p class="small secondary">${rescue ? "The board answers in rescue mode: its user microSD has no bootable OS slot yet." : "A Linux harness boots its OS from the user microSD (slot A/B). A card with no bootable slot leaves the board in rescue mode."}</p>
     <ul class="bu-os-opts" data-testid="bu-os-options">${opts.map((o) => html`<li key=${o.value} data-option=${o.value} data-disabled=${o.why ? "yes" : "no"}>
       <label class="check-inline"><input type="radio" name=${`bu-os-${bid}`} disabled=${!!o.why} checked=${w.os === o.value}
         onChange=${() => { w.os = o.value; if (o.value === "skip") w.osDone = { how: "skip", at: Date.now() }; changed(); }} />${o.label}</label>
@@ -1057,7 +1057,7 @@ function Proposal({ bid, w }) {
   </div>`;
 }
 
-// A board in stage0 rescue cannot be named yet: its real next step is the power-cycle.
+// A board in rescue mode cannot be named yet: its real next step is the power-cycle.
 export function nextTitle({ linuxUp, rescue }) {
   if (rescue) return "Next: power-cycle it, then name it";
   return linuxUp ? "Next: claim it, then name it" : "Next: name it";
@@ -1066,7 +1066,7 @@ export function nextTitle({ linuxUp, rescue }) {
 function NextStep({ bid, w }) {
   const ok = !!(w.witness && w.witness.state === "running");
   const rescue = !!(w.witness && w.witness.state === "rescue");
-  const why = ok ? "" : rescue ? "the board is in stage0 RESCUE: do step 5, power-cycle it, then wait for the harness again (step 4)"
+  const why = ok ? "" : rescue ? "the board is in rescue mode: do step 5, power-cycle it, then wait for the harness again (step 4)"
     : "once the harness answers (step 4)";
   const linuxUp = ok && w.witness.impl === "linux";
   return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title=${nextTitle({ linuxUp, rescue })} state="" testid="bu-step-next">

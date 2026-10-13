@@ -114,7 +114,7 @@ __all__ = ["ConsoleBroker", "ConsoleSubscription"]
 # Names a user may type for a console the board lists under another name.
 # "shell": on the MPS3 the shell's console is FPGA UART lane 2 on the Debug USB
 # (harness_manager_mps3/usb.py:16-17, V2M-MPS3 schematic sheet 9). An alias only
-# applies when the board has no console of that name itself (harness firmware
+# applies when the board has no console of that name itself (release
 # A12 will serve "shell" over Ethernet, TCP 6939).
 ALIASES = {"shell": "fpga_uart2"}
 

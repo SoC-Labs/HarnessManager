@@ -384,7 +384,7 @@ function AttachRow({ bid, name, onResult }) {
   };
   let screen;
   if (w.ptyUnsupported) {
-    screen = html`<span class="muted small">This harness-manager-daemon has no PTYs for screen: export over TCP.</span>`;
+    screen = html`<span class="muted small">This background service has no PTYs for screen: export over TCP.</span>`;
   } else if (pty && pty.path) {
     screen = html`<${ScreenCommand} pty=${pty} />`;
   } else if (err) {
@@ -463,7 +463,7 @@ function ResetGroup({ bid, dut }) {
 const HOSTIO_ARM = "hostio_mode";
 const HOSTIO_PANEL = "hostio_mode";
 export const HOSTIO_GATE = { capability: "mps3.hostio", arm: HOSTIO_ARM, holder: "Switch the console pins" };
-export const HOSTIO_NOT_HELD = "Load the greybox or hold the DUT first; the change applies at the next design load.";
+export const HOSTIO_NOT_HELD = "Load the empty design or hold the DUT first; the change applies at the next design load.";
 
 // The daemon's two routes are optional: a daemon without them shows the console and no mode chip.
 export const hostioRoutes = () => !!(ENDPOINTS.hostioGet && ENDPOINTS.hostioSet);

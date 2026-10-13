@@ -1278,7 +1278,7 @@ adapters = _ui2_adapters_with_states             # noqa: F811 - DemoSession impo
 #   showcase's four boards.
 # - BOARD_NEW_ETH (mps3@192.168.10.101:6900): the same board on Ethernet once the harness runs:
 #   dark (nothing answers) until a write to the USB board's SD and its MCC REBOOT; then it
-#   answers as the bare-metal harness 1.1.0, or as stage0 RESCUE when the bundle written was
+#   answers as the bare-metal harness 1.1.0, or as rescue mode when the bundle written was
 #   the Linux harness (no bootable OS slot on its user microSD yet). `engine.bringup_dark =
 #   True` keeps it dark (the witness times out: the restore offer).
 # - Bundles to bring it up with, in <state>/demo-fixtures/bringup/: a bare-metal config-SD
@@ -1297,7 +1297,7 @@ NEW_HOST = "192.168.10.101"
 BOARD_NEW_ETH = f"mps3@{NEW_HOST}:{CONTROL_PORT}"
 KIND_NEW_USB = "usb-new"
 KIND_NEW_ETH = "usb-new-eth"
-NEW_RESCUE_DETAIL = "stage0 rescue: TFTP and identify only, no control channel"
+NEW_RESCUE_DETAIL = "in rescue mode: TFTP and identify only, no control channel"
 
 
 def _bringup_bit(usercode: str) -> bytes:
@@ -1481,7 +1481,7 @@ def _bringup_come_up(engine: Any, written: dict[str, Any]) -> None:
                                       "in RESCUE (reason: no bootable OS slot on the microSD)",
                              identity=ident)
         board.health = Health(reachable=True, control_channel="rescue",
-                              notes=("stage0 RESCUE: no bootable OS slot on the user microSD",))
+                              notes=("Rescue mode: no bootable OS slot on the user microSD",))
     else:
         ident = BoardIdentity(board_type="mps3", shell_id=cat.S_ILA.lower(), rm_id="0x00000000",
                               rm_name="greybox", harness_version="1.0.0",

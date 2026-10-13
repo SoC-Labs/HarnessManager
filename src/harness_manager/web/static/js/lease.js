@@ -9,7 +9,7 @@
 //   so it may be a script, a soak or runner; D12), the confirm asks for the board's name
 //   typed, and Force stays disabled until it matches.
 // - the HOLDER: a prompt per incoming request: who wants the board and why, the
-//   countdown to their force, Release now, or Keep for 5 / 15 / 30 / 60 min (+ message).
+//   countdown to their force, Give back now, or Keep for 5 / 15 / 30 / 60 min (+ message).
 // - the VICTIM: a banner "<board> was force-released by <by> at <time>: <reason>" that
 //   stays until dismissed (across reloads) and is written to Activity.
 //
@@ -370,7 +370,7 @@ function QueuePopOpen({ bid }) {
   if (who.state === "here" && next) {
     foot = html`<span class="lq-foot-t">${next.tier === "background" ? `The automation run ${next.who}` : next.who.split("@")[0]} gets it when you release.</span>
       <button type="button" class="btn release sm" data-action="lease_release_open"
-        onClick=${(e) => { closePop(false); openReleaseConfirm(bid, e.currentTarget); }}><${Icon} name="lock-open" /> Release…</button>`;
+        onClick=${(e) => { closePop(false); openReleaseConfirm(bid, e.currentTarget); }}><${Icon} name="lock-open" /> Give back…</button>`;
   } else if (who.state === "other" || who.state === "elsewhere") {
     foot = mine || requesting
       ? html`<span class="lq-foot-t">You are #${(mine && mine.pos) || who.position || "?"}: ${who.holder.split("@")[0]} sees your request.</span>
@@ -457,7 +457,7 @@ function requestSpec(bid, message, want = 0) {
         if (L.leaving.has(bid)) return { left: true };        // we withdrew it: not a failure
         if (!routeMissing(e)) throw e;
         // A daemon from before lease requests (LR-C): queue plainly, as "Queue for it" did.
-        ctx.progress("this harness-manager-daemon has no lease requests: queued without asking the holder", "fallback");
+        ctx.progress("this background service has no lease requests: queued without asking the holder", "fallback");
         return await runJob("leaseTake", { bid }, {}, onProgress, "lease");
       } finally {
         L.leaving.delete(bid);
@@ -546,7 +546,7 @@ function forceSpec(bid, confirmBoard = "") {
   const holder = (hub && hub.lease && hub.lease.holder) || "the holder";
   const typed = String(confirmBoard || "").trim();
   return {
-    key: "lease_force", label: "Force release", busyLabel: "Force releasing...", budgetS: 120,
+    key: "lease_force", label: "Force give back", busyLabel: "Force giving back...", budgetS: 120,
     command: typed ? `lease force ${cliTarget(bid)} --confirm-board ${/^[A-Za-z0-9_.:@-]+$/.test(typed) ? typed : shellQuote(typed)}` : `lease force ${cliTarget(bid)} --yes`,
     run: (ctx) => runJob("leaseForce", { bid }, typed ? { confirm: true, confirm_board: typed } : { confirm: true },
       (d) => ctx.progress(d.phase || "revoking", d.phase), "lease_force"),
@@ -695,7 +695,7 @@ function RequestBar({ bid }) {
           aria-disabled=${canForce && !forceBusy ? undefined : "true"} aria-busy=${forceBusy ? "true" : undefined}
           aria-haspopup="dialog" title=${why || "Kick the holder off the board now (asks first)"}
           onClick=${(e) => { if (!forceBusy) openConfirm(bid, e.currentTarget); }}>
-          ${forceBusy ? html`<${Spinner} /> Force releasing...` : html`<${Icon} name="zap" /> Force release…`}</button>
+          ${forceBusy ? html`<${Spinner} /> Force giving back...` : html`<${Icon} name="zap" /> Force give back…`}</button>
         ${why ? html`<${Reason} text=${`Force: ${why}`} icon="circle-slash" testid="reason-lease_force" />` : null}
       </div>
       ${resultBlocks}
@@ -718,7 +718,7 @@ function respond(bid, note, answer, minutes, message) {
   const target = leaseBoardName(bid);
   const flags = answer === "release" ? "--release" : `--keep ${minutes}`;
   const spec = {
-    key: `respond_${answer}`, label: answer === "release" ? "Release now" : `Keep ${minutes} min`,
+    key: `respond_${answer}`, label: answer === "release" ? "Give back now" : `Keep ${minutes} min`,
     busyLabel: "Answering...", budgetS: 30,
     command: `lease respond ${cliTarget(bid)} ${note.id} ${flags}${message ? ` --message ${shellQuote(message)}` : ""}`,
     run: async () => (await call("leaseRespond", { bid }, {
@@ -775,7 +775,7 @@ function HolderPrompt({ bid, note }) {
           aria-label=${`Message to ${note.by} (optional)`} data-testid="wanted-message" value=${message}
           onInput=${(e) => setMessage(e.target.value)} disabled=${busy} />`}
         <button type="button" class="btn sm primary" data-action="respond_release" disabled=${busy}
-          onClick=${() => respond(bid, note, "release", 0, off ? "" : message.trim())}><${Icon} name="lock-open" /> Release now</button>
+          onClick=${() => respond(bid, note, "release", 0, off ? "" : message.trim())}><${Icon} name="lock-open" /> Give back now</button>
         ${off ? null : html`<span class="keep-group" role="group" aria-label="Keep it for">
           <span class="keep-label">Keep for</span>
           ${KEEP_MINUTES.map((m) => html`<button type="button" key=${m} class="btn sm" data-action=${`respond_keep_${m}`}
@@ -784,7 +784,7 @@ function HolderPrompt({ bid, note }) {
         ${busy ? html`<span class="muted small"><${Spinner} /> answering</span>` : null}
       </div>
       ${off ? html`<${Reason} icon="circle-slash" testid="wanted-notes-off"
-        text=${`No message and no "keep for N min" here: ${off}. Release now still works; to keep the board, tell ${note.by} another way.`} />` : null}
+        text=${`No message and no "keep for N min" here: ${off}. Give back now still works; to keep the board, tell ${note.by} another way.`} />` : null}
       ${p.lines.length ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="result-lease_respond" />` : null}
     </div>
   </div>`;
@@ -1014,7 +1014,7 @@ function ForceConfirm() {
   return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget) closeConfirm(); }}>
     <div class="modal small danger" role="alertdialog" aria-modal="true" aria-labelledby="force-title"
       aria-describedby="force-what" ref=${ref} data-testid="force-confirm">
-      <div class="modal-head"><${Icon} name="zap" /><h2 class="card-title" id="force-title">Force release ${name}?</h2></div>
+      <div class="modal-head"><${Icon} name="zap" /><h2 class="card-title" id="force-title">Force give back ${name}?</h2></div>
       <div class="modal-pad">
         <p id="force-what" class="force-what" data-testid="force-what">This kicks <strong>${holder}</strong> off <strong>${name}</strong> now;
           anything they are running is interrupted.</p>
@@ -1094,7 +1094,7 @@ export function ReleaseButton({ bid, compact = true }) {
     aria-haspopup="dialog" aria-busy=${running ? "true" : undefined}
     title="Give the hub lease back so others can take the board (asks first)"
     onClick=${(e) => { if (!running) openReleaseConfirm(bid, e.currentTarget); }}>
-    ${running ? html`<${Spinner} /> Releasing...` : html`<${Icon} name="lock-open" /> Release lease`}</button>`;
+    ${running ? html`<${Spinner} /> Giving back...` : html`<${Icon} name="lock-open" /> Give back lease`}</button>`;
 }
 
 export function openReleaseConfirm(bid, trigger = null) {
@@ -1141,28 +1141,28 @@ function ReleaseConfirm() {
     <div class="modal small" role="alertdialog" aria-modal="true" aria-labelledby="release-title"
       aria-describedby="release-what" ref=${ref} data-testid="release-confirm" data-board=${bid}>
       <div class="modal-head"><${Icon} name="lock-open" /><h2 class="card-title" id="release-title"
-        data-testid="release-title">Release ${target}?</h2></div>
+        data-testid="release-title">Give back ${target}?</h2></div>
       <div class="modal-pad">
         <p id="release-what" data-testid="release-what">Others can take it${next
           ? html`: <strong>${next}</strong> is next in the queue and gets it` : null}; background checks pause.</p>
         ${note ? html`<p class="secondary small" data-testid="release-target">${"The hub leases it as target "}<code>${note}</code>.</p>` : null}
         <p class="secondary small">${leaseBoardName(bid)} stays open here. Once someone else holds the lease,
           this page reads the board only when you click, and nothing you run should drive it until the lease
-          is yours again (Acquire lease, or Request board).</p>
+          is yours again (Take lease, or Request board).</p>
         ${why ? html`<${Reason} level="warn" icon="circle-slash" testid="release-why" text=${`Not now: ${why}.`} />` : null}
       </div>
       <div class="modal-foot">
         <button type="button" class="btn" data-action="release_cancel" onClick=${closeRelease} data-autofocus>Cancel</button>
         <button type="button" class="btn primary" data-action="release_confirm" onClick=${confirmRelease}
           aria-disabled=${why ? "true" : undefined} title=${why || undefined}>
-          <${Icon} name="lock-open" /> Release</button>
+          <${Icon} name="lock-open" /> Give back</button>
       </div>
     </div>
   </div>`;
 }
 
 // Close board (round 3, M1): always asks what should happen to the board. A board whose lease
-// THIS Harness Manager holds offers "Restore baseline, release and close" (the default when a
+// THIS Harness Manager holds offers "Restore baseline, give back and close" (the default when a
 // design other than the baseline is loaded: the next person finds a clean board), "Release and
 // close", or "Close and keep the lease"; a board with no hub, Close or "Restore baseline and
 // close"; anyone else's hub board, Close (the lease stays where it is). Restoring is Restore
@@ -1205,12 +1205,12 @@ export function closeOptions(bid) {
   const opts = [];
   if (who.state === "here") {
     const next = nextHolder(who);
-    opts.push({ k: "restore", t: "Restore baseline, release and close", dis: loaded === false ? `${base} is loaded already` : restoreWhy,
+    opts.push({ k: "restore", t: "Restore baseline, give back and close", dis: loaded === false ? `${base} is loaded already` : restoreWhy,
       said: loaded === false, s: loaded === false ? `${base} is loaded already.`
         : `Loads ${base}${loaded === null ? " (the design loaded now was not read)" : ` in place of ${design}`}, gives the lease back to the hub, closes ${name}. The next person finds a clean board.` });
     const on = leaseName(who) || name;
     const note = leaseTargetNote(who);
-    opts.push({ k: "release", t: "Release and close", testid: "close-release-what",
+    opts.push({ k: "release", t: "Give back and close", testid: "close-release-what",
       s: `${loaded ? `Leaves ${design} loaded. ` : ""}The lease on ${on}${note ? ` (target ${note})` : ""} goes back to the hub now${next ? `: ${next} is next and gets it` : ""}.` });
     opts.push({ k: "keep", t: "Close and keep the lease", testid: "close-keep-what",
       s: `It stays yours${at ? ` until ${clock(at)}` : ""}, but nothing renews it while the board is closed. Open the board again to keep renewing it.` });
@@ -1328,7 +1328,7 @@ function CloseConfirm() {
           onClick=${endClosing} data-autofocus>Cancel</button>
         <button type="button" class="btn primary" data-action="close_confirm" data-picked=${pick} disabled=${!!busy}
           aria-busy=${busy ? "true" : undefined} onClick=${() => closeWith(pick)}>
-          ${busy ? html`<${Spinner} /> ${busy.startsWith("restore") ? "Restoring..." : busy === "release" ? "Releasing..." : "Closing..."}`
+          ${busy ? html`<${Spinner} /> ${busy.startsWith("restore") ? "Restoring..." : busy === "release" ? "Giving back..." : "Closing..."}`
             : chosen.t}</button>
       </div>
     </div>

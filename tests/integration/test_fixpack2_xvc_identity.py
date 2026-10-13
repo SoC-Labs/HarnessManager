@@ -1,6 +1,6 @@
 """FIX-PACK-2 item 4: `xvc status` states the XVC capability from the board's CURRENT identity.
 
-On the lab board, `xvc status` said "cannot: needs harness firmware with 'xvc_dbgbr' (v0.11 or
+On the lab board, `xvc status` said "cannot: needs a release with 'xvc_dbgbr' (v0.11 or
 later)" while the board reported ``xvc_dbgbr``. The source: the MPS3 XVC adapter judged from
 the identity it was built with (the probe's; one found by UDP identify, or while another
 client held 6900, carries NO features), and nothing but the XVC service ever told it better,

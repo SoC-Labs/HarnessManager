@@ -194,7 +194,7 @@ def test_negative_twin_a_board_with_no_hub_has_no_lease_badge(page_factory, daem
 def test_release_is_prominent_where_the_lease_is_yours_and_asks_first(page_factory, daemon):
     page = hub_page(page_factory, daemon, "mine")
     header = page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]')
-    expect(header).to_have_text("Release lease")
+    expect(header).to_have_text("Give back lease")
     expect(header).to_have_class(re.compile(r"\brelease\b"))
     expect(header).not_to_have_class(re.compile(r"\bghost\b"))           # a real button
     # Cancel (and Escape) release nothing, and focus goes back
@@ -202,7 +202,7 @@ def test_release_is_prominent_where_the_lease_is_yours_and_asks_first(page_facto
     dialog = by_id(page, "release-confirm")
     expect(dialog).to_be_visible()
     assert dialog.get_attribute("role") == "alertdialog"
-    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Release {HUB_BOARD}?")
+    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Give back {HUB_BOARD}?")
     expect(dialog.locator('[data-testid="release-target"]')).to_have_text(
         f"The hub leases it as target {TARGET}.")
     expect(dialog.locator('[data-testid="release-what"]')).to_have_text(
@@ -269,7 +269,7 @@ def test_lease_text_names_the_board_with_the_target_as_a_detail(page_factory, da
     expect(by_id(page, "ov-lease-chip")).to_have_attribute("title", re.compile(re.escape(where)))
     page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
     dialog = by_id(page, "release-confirm")
-    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Release {HUB_BOARD}?")
+    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Give back {HUB_BOARD}?")
     expect(dialog.locator("code")).to_have_text(TARGET)
     assert page.errors == []
 
@@ -288,7 +288,7 @@ def test_negative_twin_a_target_with_no_board_of_its_own_reads_as_before(page_fa
     assert "(target" not in (badge.get_attribute("title") or "")
     page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
     dialog = by_id(page, "release-confirm")
-    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Release {TARGET}?")
+    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Give back {TARGET}?")
     assert dialog.locator('[data-testid="release-target"]').count() == 0
     dialog.locator('[data-action="release_cancel"]').click()
     close_board(page)
@@ -327,7 +327,7 @@ def test_close_asks_about_a_lease_you_hold_and_cancel_leaves_the_board_open(page
         f"The lease on {HUB_BOARD} (target {TARGET}) goes back to the hub now")
     expect(dialog.locator('[data-testid="close-keep-what"]')).to_contain_text(
         re.compile(r"It stays yours until \d\d:\d\d:\d\d, but nothing renews it while the board is closed"))
-    for choice, text in (("restore", "Restore baseline, release and close"), ("release", "Release and close"),
+    for choice, text in (("restore", "Restore baseline, give back and close"), ("release", "Give back and close"),
                          ("keep", "Close and keep the lease")):
         expect(dialog.locator(f'[data-choice="{choice}"] b')).to_have_text(text)
     expect(dialog.locator('[data-action="close_cancel"]')).to_have_text("Cancel")

@@ -143,8 +143,8 @@ def test_nothing_configured_nothing_reported_gives_four_honest_rows():
     rows = Mps3Telemetry(session).readings()
     assert names(rows) == ["fpga_die_temp", "lcd_ambient_temp", "board_power", "onchip_power_estimate"]
     assert all(r.value is None and r.reason and r.source for r in rows)
-    assert "harness firmware with 'sysmon'" in rows[0].reason
-    assert rows[1].reason == "needs harness firmware with 'touch_temp'"
+    assert "a release with 'sysmon'" in rows[0].reason
+    assert rows[1].reason == "needs a release with 'touch_temp'"
     assert rows[2].reason == NO_POWER_SENSOR and rows[3].reason == NO_ESTIMATES
     # No network: the probe-time identity answered the feature question.
     assert session.identity_calls == 0 and session.shell.calls == 0
@@ -160,7 +160,7 @@ def test_without_a_probe_identity_it_asks_once():
 
 def test_no_ethernet_link_says_so():
     rows = Mps3Telemetry(FakeSession(shell=None, links=())).readings()
-    assert "or the Ethernet link and harness firmware with 'sysmon'" in rows[0].reason
+    assert "or the Ethernet link and a release with 'sysmon'" in rows[0].reason
     assert rows[1].reason.startswith("needs the Ethernet link")
     assert "unknown (no Ethernet link" not in rows[3].reason          # estimates not configured
 
@@ -175,7 +175,7 @@ def test_identity_failure_is_the_reason_and_is_retried_soon():
     # The board comes back: after the short retry interval the real answer is used.
     session.ident_error = None
     clock.sleep(tm.SHELL_MIN_INTERVAL_S + 0.1)
-    assert adapter.readings()[1].reason == "needs harness firmware with 'touch_temp'"
+    assert adapter.readings()[1].reason == "needs a release with 'touch_temp'"
     calls = session.identity_calls
     adapter.readings()                                   # a good identity is kept longer
     assert session.identity_calls == calls

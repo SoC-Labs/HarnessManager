@@ -202,7 +202,7 @@ function imageText(bid) {
   const b = boardState(bid);
   const k = osKind(bid);
   if (k === "bm") return "the config SD (bare-metal)";
-  if (k === "netboot") return "netbooted: the hub serves the image at every cold boot (no user microSD)";
+  if (k === "netboot") return "netbooted: the hub serves the release at every cold boot (no user microSD)";
   if (k === "card") {
     const run = (b.slots && b.slots.slots) || (b.card && b.card.os_slots) || {};
     const s = (run.slots || {})[run.running] || {};
@@ -231,15 +231,19 @@ function About({ bid }) {
         <dt>Links</dt><dd>${links.length ? links.map((l) => html`<${LinkLine} key=${l.kind + l.address} link=${l} />`)
           : html`<span class="muted small">none reported</span>`}</dd>
         ${hub ? html`<dt>Hub target</dt><dd class="mono small">${hub.target || "?"} · ${hub.host}</dd>` : null}
-        <dt>Shell</dt><dd class="mono small" data-testid="about-shell">${id.shell_id || "unknown"}</dd>
-        <dt>Harness</dt><dd class="small" data-testid="about-harness">${id.harness_version || "unknown"}${id.harness_impl ? ` · ${id.harness_impl}` : ""}${id.proto ? ` · protocol ${id.proto}` : ""}
-          ${id.firmware_sha ? html` · fw <span class="mono">${id.firmware_sha}</span>` : null}</dd>
-        <dt>Image</dt><dd class="small">${imageText(bid)}</dd>
-        ${id.usercode ? html`<dt>Usercode</dt><dd class="mono small">${id.usercode}</dd>` : null}
+        <dt>Release</dt><dd class="small" data-testid="about-harness">${id.harness_version || "unknown"}${id.harness_impl ? ` · ${id.harness_impl}` : ""}</dd>
+        <dt>Software on the board</dt><dd class="small">${imageText(bid)}</dd>
         <dt>Build check</dt><dd class="small"><${CheckChip} check=${id.build_check} testid="about-build" /></dd>
-        <dt>Features</dt><dd>${feats.length ? html`<div class="tags" data-testid="about-features">${feats.map((f) => html`<span class="tag" key=${f}>${f}</span>`)}</div>`
-          : html`<span class="muted">none reported</span>`}</dd>
       </dl>
+      <details class="os-more" data-testid="about-details"><summary>Technical details</summary>
+        <dl class="kv">
+          <dt>Shell</dt><dd class="mono small" data-testid="about-shell">${id.shell_id || "unknown"}</dd>
+          <dt>Protocol</dt><dd class="small">${id.proto || "unknown"}</dd>
+          <dt>Build id</dt><dd class="mono small">${id.firmware_sha || "unknown"}</dd>
+          ${id.usercode ? html`<dt>Usercode</dt><dd class="mono small">${id.usercode}</dd>` : null}
+          <dt>Features</dt><dd>${feats.length ? html`<div class="tags" data-testid="about-features">${feats.map((f) => html`<span class="tag" key=${f}>${f}</span>`)}</div>`
+            : html`<span class="muted">none reported</span>`}</dd>
+        </dl></details>
       <div data-testid="capabilities-card"><div class="bt-sub-h">Not available here</div>
         ${missing.length ? html`<ul class="bt-caps" data-testid="about-missing">${missing.map(([n, why]) => html`<li key=${n} data-capability=${n}>
           <b>${capTitleOf(n)}</b>: ${why}</li>`)}</ul>`

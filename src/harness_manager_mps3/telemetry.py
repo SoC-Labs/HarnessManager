@@ -559,10 +559,10 @@ class Mps3Telemetry:
             reason = f"{ident_err}; or configure [boards.<id>.sysmon] for a JTAG cable on J17"
         elif self._shell is None:
             reason = ("needs a JTAG cable on J17 ([boards.<id>.sysmon] in boards.toml), or the "
-                      "Ethernet link and harness firmware with 'sysmon'")
+                      "Ethernet link and a release with 'sysmon'")
         else:
             reason = ("needs a JTAG cable on J17 ([boards.<id>.sysmon] in boards.toml), or "
-                      "harness firmware with 'sysmon'")
+                      "a release with 'sysmon'")
         return [Reading.unavailable("fpga_die_temp", "degC", reason, source="sysmon")]
 
     def _jtag_sysmon(self) -> list[Reading]:
@@ -588,9 +588,9 @@ class Mps3Telemetry:
         if ident_err:
             reason = ident_err
         elif self._shell is None:
-            reason = "needs the Ethernet link to the shell and harness firmware with 'touch_temp'"
+            reason = "needs the Ethernet link to the shell and a release with 'touch_temp'"
         else:
-            reason = "needs harness firmware with 'touch_temp'"
+            reason = "needs a release with 'touch_temp'"
         return [Reading.unavailable("lcd_ambient_temp", "degC", reason, source="stmpe811")]
 
     def _power_readings(self) -> list[Reading]:

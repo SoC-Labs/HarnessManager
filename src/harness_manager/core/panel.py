@@ -98,7 +98,7 @@ ROLE_INVERTED = role_code("banner-err")       # "q"
 ROLE_DUT_NOTICE = role_code("banner-held")    # "u": "DUT HAS THE DISPLAY", rows 6-8
 ROLE_IDENTIFY = role_code("banner-busy")      # "t": "IDENTIFY: <who>", rows 10-12
 
-SOURCE_PANEL = "panel"       # read from the panel (a harness image with `panel`/`hello`)
+SOURCE_PANEL = "panel"       # read from the panel (a release with `panel`/`hello`)
 SOURCE_REBUILT = "rebuilt"   # rebuilt by Harness Manager from what it read (no `panel`)
 REBUILT_NOTE = "rebuilt from what Harness Manager read, not read from the panel"
 #: PANEL-TRUTH: what a rebuilt frame shows for a fact Harness Manager did not read ("?" read

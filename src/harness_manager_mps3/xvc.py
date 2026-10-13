@@ -91,7 +91,7 @@ TARGET = "debug_bridge_0 (the Debug Bridge, XAPP1251 layout, at 0x44A8)"
 
 JTAGBB_REASON = ("2542 on this image drives jtag_bb (the Identify path), not the Debug Bridge: "
                  "no ILAs to debug over XVC")
-NO_DBGBR_REASON = "needs harness firmware with 'xvc_dbgbr' (v0.11 or later)"
+NO_DBGBR_REASON = "needs a release with 'xvc_dbgbr' (v0.11 or later)"
 NO_LOCK_NOTE = ("this Linux harness does not report the XVC lock ('xvc_lock') yet, so 2542 "
                 "still answers anyone on the board network; the board-SSH reach is yours, "
                 "the port is not")

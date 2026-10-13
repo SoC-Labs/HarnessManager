@@ -339,7 +339,7 @@ def usb_cand(n: int = 0, *, serial: bool = True, volume: str | None = "/media/me
 
 
 def eth_cand(host: str = "192.168.10.101", rescue: bool = False) -> Candidate:
-    detail = "stage0 rescue: TFTP and identify only, no control channel" if rescue else \
+    detail = "Rescue mode: TFTP and identify only, no control channel" if rescue else \
         "shell control channel"
     return Candidate("mps3", f"mps3@{host}:6900", (Link(LinkKind.ETHERNET, f"{host}:6900", detail),),
                      identity=BoardIdentity("mps3", harness_version="1.0.0",
@@ -451,7 +451,7 @@ def test_the_witness_reports_stage0_rescue():
     c = Clock()
     out = bringup.witness(LateEngine(0, eth_cand(rescue=True)), wait_s=5, now=c.now,
                           sleep=c.sleep)
-    assert out["state"] == "rescue" and "RESCUE" in out["text"]
+    assert out["state"] == "rescue" and "Rescue mode" in out["text"]
 
 
 # --- the switches --------------------------------------------------------------------------------

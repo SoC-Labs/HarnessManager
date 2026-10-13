@@ -24,10 +24,10 @@ NEEDS_USB = "needs the Debug USB cable"
 #: capability and feature name, never a harness type guessed from a missing feature: the
 #: Linux harness rc2_v6 lacks 'panel', 'presence' and 'locate' too. The UI names the type
 #: only from the harness's own ``version.impl`` (``PanelSupport.impl``).
-NEEDS_PANEL = ("needs the Ethernet link and a harness image that reports its front panel "
+NEEDS_PANEL = ("needs the Ethernet link and a release that reports its front panel "
                "(harness feature 'panel' or 'clcd_kvm')")
-NEEDS_LOCATE = "Identify isn't available on this harness image yet (harness feature 'locate')"
-NEEDS_PRESENCE = ("this harness image doesn't report who is connected "
+NEEDS_LOCATE = "Identify isn't available on this release yet (harness feature 'locate')"
+NEEDS_PRESENCE = ("this release doesn't report who is connected "
                   "(harness feature 'presence')")
 #: The live display (lane LM2). The adapter (``display.py``) says which of these is missing.
 NEEDS_LCD_MIRROR = "needs the Linux harness with lcd_mirror and a claimed board"
@@ -41,7 +41,7 @@ NEEDS_ETHERNET_LAN = ("needs an Ethernet link on the board's own network (identi
 #: ``mccif`` (in-fabric SCC) and ``mcc_local`` (the USB loopback), with the route read from
 #: ``mcc status`` (``harness_mcc.py``); ``mcc`` is the pre-v0.18 alias (the J7 mod).
 HARNESS_MCC = ("mccif", "mcc_local", "mcc")
-NEEDS_MCC_HARNESS = "harness firmware with 'mccif' or 'mcc_local' (net-protocol v0.18)"
+NEEDS_MCC_HARNESS = "a release with 'mccif' or 'mcc_local' (net-protocol v0.18)"
 
 #: Mint 4 (net-protocol v0.20) feature names. Gate on these NAMES, never on the protocol
 #: version (contract, "Mint 4"). The verb ``mcc`` exists when either MCC name is reported.
@@ -106,7 +106,7 @@ SPECS: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(C.TELEMETRY_TEMP, "Temperatures",
                    (via(L.USB_SERIAL), via(L.JTAG), via(L.HUB),
                     via(L.ETHERNET, features=("touch_temp",)), via(L.ETHERNET, features=("sysmon",))),
-                   needs_hint=NEEDS_USB + ", a JTAG cable on J17, or newer harness firmware"),
+                   needs_hint=NEEDS_USB + ", a JTAG cable on J17, or newer release"),
     CapabilitySpec(C.TELEMETRY_POWER, "Board power", (via(L.SMART_POWER),),
                    needs_hint="the MPS3 has no power sensor; add a metered plug or an INA260"),
     # Only an outlet can cycle; a meter-only INA260 also gives SMART_POWER, so
@@ -144,22 +144,22 @@ SPECS: tuple[CapabilitySpec, ...] = (
                    needs_hint=NEEDS_PRESENCE),
     # --- Mint 4 (net-protocol v0.20), gated on feature NAMES only. ---
     CapabilitySpec(HOSTIO_CAP, "Host I/O to the DUT (hostio)", _via_names((HOSTIO,), *_ETH_HUB),
-                   needs_hint="harness firmware that reports 'hostio' (newer images)"),
+                   needs_hint="a release that reports 'hostio' (newer images)"),
     CapabilitySpec(SENSORS_CAP, "Board sensors (sensors)", _via_names((SYSMON,), *_ETH_HUB),
-                   needs_hint="harness firmware that reports 'sysmon' (newer images)"),
+                   needs_hint="a release that reports 'sysmon' (newer images)"),
     CapabilitySpec(MCC_CAP, "Board controller through the harness (mcc)",
                    _via_names((MCCIF, MCC_LOCAL), *_ETH_HUB),
                    needs_hint=NEEDS_MCC_HARNESS),
     CapabilitySpec(COSIM_CAP, "Co-simulation clock and debug (cosim)",
                    _via_names((COSIM,), *_ETH_HUB),
-                   needs_hint="harness firmware that reports 'cosim' (newer images)"),
+                   needs_hint="a release that reports 'cosim' (newer images)"),
     # The user microSD card: OS slots (the slot verbs) and the design store (usd).
     CapabilitySpec(OS_SLOTS_CAP, "OS slots on the user card",
                    _via_names((SLOT,), *_ETH_HUB, L.SSH),
                    needs_hint="the Linux harness with OS slots (harness feature 'slot')"),
     CapabilitySpec(DESIGN_STORE_CAP, "Design store on the user card",
                    _via_names((USD,), *_ETH_HUB),
-                   needs_hint="harness firmware with the user-card store (harness feature 'usd')"),
+                   needs_hint="a release with the user-card store (harness feature 'usd')"),
     # The live, pixel-exact LCD mirror (lane LM2, docs/design/LCD_MIRROR.md §7.1). ``lcd_mirror``
     # is an ENGINE name in version.features (net-protocol v0.15: no bit), matched by name. The
     # board serves it on its loopback only, reached over the claimed board SSH: the Ethernet or

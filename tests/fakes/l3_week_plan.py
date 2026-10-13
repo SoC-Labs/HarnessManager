@@ -523,7 +523,7 @@ class WeekPlanSim:
             return self._row("serial", baud, "serial", settable=True, choices=SERIAL_CHOICES)
         if name == "swo":
             return self._row("ethernet", SWO_BAUD, "harness", cite=SWO_SOURCE,
-                             reason=f"the harness firmware fixes the SWO deserialiser at "
+                             reason=f"the release fixes the SWO deserialiser at "
                                     f"{SWO_BAUD} baud (divisor 24 at the 50 MHz dut_clk; "
                                     f"{SWO_SOURCE})")
         if name == "uart1":
@@ -540,7 +540,7 @@ class WeekPlanSim:
                              settable=True, choices=HARNESS_CHOICES, mode=mode, design=design)
         return self._row("ethernet", DESIGN_BAUD, "design", design=design, cite=cite,
                          reason=f"{design} fixes {name} at {DESIGN_BAUD} baud when it is built "
-                                f"({cite}); changing it at run time needs harness firmware "
+                                f"({cite}); changing it at run time needs release "
                                 "with 'uart_baud'")
 
     def consoles_view(self, bid: str) -> list[dict[str, Any]]:

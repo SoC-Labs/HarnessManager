@@ -8,7 +8,7 @@
 // - a zip (a packed overlay folder, or a build directory's out/ with its receipt), sent as the
 //   request body: POST /overlays/upload (a browser never reveals a file's path);
 // - From Build: the builds this page's Build tab checked and has not added yet;
-// - a path on harness-manager-daemon's host (a folder, its manifest.json, a receipt or a build
+// - a path on the background service's computer (a folder, its manifest.json, a receipt or a build
 //   directory): POST /overlays/import.
 // Every way answers the same five groups (Files, Same shell, rm_id in the user range, CRC and
 // sizes, Clearing pairs with the partial) and refuses with the daemon's code: exit 14
@@ -54,7 +54,7 @@ function boardStatic(bid) {
 const GROUPS = [
   { id: "files", title: "Files", d: () => "manifest.json with the partial and clearing it names, or a passed build receipt and its pair" },
   { id: "shell", title: "Same shell", d: (bid) => `built for the shell ${bid} runs${boardStatic(bid) ? `, ${boardStatic(bid)}` : ""}` },
-  { id: "rm_id", title: "rm_id in the user range", d: () => "design id 0x8000-0xFFFF; outside it, or one another design holds, is a warning" },
+  { id: "rm_id", title: "design number in the user range", d: () => "design id 0x8000-0xFFFF; outside it, or one another design holds, is a warning" },
   { id: "crc", title: "CRC and sizes", d: () => "the partial and clearing match the manifest's (or the receipt's) lengths and CRC-32" },
   { id: "pair", title: "Clearing pairs with the partial", d: () => "the clearing's frames lie inside the partial's; it fits the harness's clearing arena" },
 ];
@@ -224,7 +224,7 @@ function ImportDialog({ bid, way: startWay = "file" }) {
           onKeyDown=${(e) => { if (e.key === "Enter" && m.fpath.trim()) run(true); }} />
         <button type="button" class="btn sm" data-testid="import-folder-read" disabled=${!!m.busy || !m.fpath.trim()} onClick=${() => run(true)}>
           ${m.busy === "read" ? html`<${Spinner} />` : html`<${Icon} name="scan-search" />`}Read it</button></div>
-      <div class="small muted">A folder holding one sub-folder per design (a release's <code>overlays/</code>): an absolute path on harness-manager-daemon's host. Each design is checked and imported on its own; one that does not fit never stops the others.</div>`;
+      <div class="small muted">A folder holding one sub-folder per design (a release's <code>overlays/</code>): an absolute path on the background service's computer. Each design is checked and imported on its own; one that does not fit never stops the others.</div>`;
   } else {
     src = html`<div class="field" style="flex-wrap:wrap"><label for="imp-path">Path</label>
         <input id="imp-path" class="input mono grow" data-testid="import-path" placeholder="/home/you/builds/blinky_rm/out/blinky_rm_build.json"
@@ -232,7 +232,7 @@ function ImportDialog({ bid, way: startWay = "file" }) {
           onKeyDown=${(e) => { if (e.key === "Enter" && m.path.trim()) run(true); }} />
         <button type="button" class="btn sm" data-testid="import-read" disabled=${!!m.busy || !m.path.trim()} onClick=${() => run(true)}>
           ${m.busy === "read" ? html`<${Spinner} />` : html`<${Icon} name="scan-search" />`}Read it</button></div>
-      <div class="small muted">An overlay folder (or its manifest.json), a build receipt, or the build directory holding one: an absolute path on harness-manager-daemon's host. A zip: choose it (A zip).</div>`;
+      <div class="small muted">An overlay folder (or its manifest.json), a build receipt, or the build directory holding one: an absolute path on the background service's computer. A zip: choose it (A zip).</div>`;
   }
 
   const res = m.res;
@@ -276,7 +276,7 @@ function ImportDialog({ bid, way: startWay = "file" }) {
       ${!fol.check_only && !fol.counts.imported ? html`<${Reason} level="warn" testid="import-folder-none" text=${`Nothing was imported${fol.counts.skipped ? `: ${fol.counts.skipped} built for another static` : ""}${fol.counts.refused ? `${fol.counts.skipped ? "," : ":"} ${fol.counts.refused} refused` : ""}.`} />` : null}
     </div>` : null}
     ${m.done ? html`<div class="outcome ok" role="status" data-testid="import-ok"><${Icon} name="circle-check" /><span>Imported <b>${m.done.name}</b> <span class="mono">${m.done.rm_id}</span> into the overlay store${m.done.overlay_dir ? html` (packed in <span class="mono">${m.done.overlay_dir}</span>)` : ""}. The Workbench lists it for every board on ${m.done.static_id}: pick it, tick Arm, then Program.</span></div>` : null}
-    ${shadow ? html`<${Reason} level="warn" testid="import-shadowed" text=${`The Workbench lists ${shadow} instead: the same name, rm_id and static, and the first one found wins. Rename your design to see yours.`} />` : null}
+    ${shadow ? html`<${Reason} level="warn" testid="import-shadowed" text=${`The Workbench lists ${shadow} instead: the same name, design number and static, and the first one found wins. Rename your design to see yours.`} />` : null}
     ${res && !m.err && !m.done && res.passed ? html`<${Reason} level="ok" testid="import-checked" text=${`${res.name} passes: Check and import puts it in the overlay store.`} />` : null}
     ${res && !m.err && !m.done && !res.passed ? html`<${Reason} level="err" testid="import-would-refuse" text=${`${res.name} would be refused: ${(res.groups || []).filter((g) => g.state === "mismatch").map((g) => `${g.title}: ${g.detail}`).join("; ")}.`} />` : null}
     ${m.err ? html`<div class="outcome err" role="alert" data-testid="import-refused" data-error=${m.err.errName}><${Icon} name="circle-x" /><span>

@@ -271,7 +271,7 @@ class ShareRef:
         target, _, tty = rest.partition("/")
         if not host or not target or not tty.startswith("dev/"):
             raise UsageError(f"hub share address {address!r} is not HOST/TARGET/dev/...",
-                             hint="e.g. hub://mapstone-dev.ecs.soton.ac.uk/mps3_01_pl/dev/mps3_01_pl/tty_00")
+                             hint="e.g. hub://hub.example.org/mps3_01_pl/dev/mps3_01_pl/tty_00")
         return cls(host, target, "/" + tty)
 
     @property

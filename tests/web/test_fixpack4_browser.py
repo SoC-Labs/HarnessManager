@@ -354,9 +354,9 @@ def test_the_header_says_release_or_firmware_and_never_disagrees_silently(page_f
                                                                             timeout=T)
     # the mock's board now runs release 1.1.1 while its firmware still says 1.0.0: both are said
     expect(value).to_have_text("release 1.1.1", timeout=T)
-    expect(by_id(page, "fact-harness-fw")).to_have_text(" · firmware 1.0.0")
+    expect(by_id(page, "fact-harness-fw")).to_have_text(" · reports 1.0.0")
     expect(by_id(page, "harness-running")).to_contain_text("1.1.1")
-    expect(by_id(page, "harness-running-fw")).to_have_text("firmware reports 1.0.0")
+    expect(by_id(page, "harness-running-fw")).to_have_text("release reports 1.0.0")
     assert page.errors == []
 
 
@@ -364,7 +364,7 @@ def test_negative_twin_before_the_list_is_read_the_header_says_firmware(page_fac
     page = page_factory(**APP)
     open_board(page)
     value = by_id(page, "fact-harness-value")
-    expect(value).to_have_text("firmware 1.0.0", timeout=T)
+    expect(value).to_have_text("release 1.0.0", timeout=T)
     expect(value).to_have_attribute("data-source", "firmware")
     assert "version verb" in (value.get_attribute("title") or "")
     expect(by_id(page, "fact-harness-fw")).to_have_count(0)

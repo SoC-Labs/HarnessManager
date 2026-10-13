@@ -77,7 +77,7 @@ CAPABILITY = BI.CAPABILITY
 #: How long a board read is reused by ``info`` (``cheap``).
 READ_TTL_S = 30.0
 IDENTIFY_TIMEOUT_S = 0.5
-PENDING_WHY = ("pending the Linux lead's interface: this harness image has no identity verbs "
+PENDING_WHY = ("pending the Linux lead's interface: this release has no identity verbs "
                "(net-protocol v0.16 `identity`/`identity_set`, images rc2_v7 and later)")
 NETBOOT_WHY = ("this board has no persistent store for an identity (a netboot, no user "
                "microSD, or a card written on a PC whose /persist partition is still blank): "
@@ -107,9 +107,9 @@ RESERVED_MAC_WHY = "the MPS3 image's own range: its default MAC and the stage0 b
 IP_POOL_KEY = "mps3.identity.ip_pool"
 IP_POOL_ENV = "HARNESS_MANAGER_MPS3_IP_POOL"
 DEFAULT_IP_POOL = "192.168.10.110-199"
-#: Never handed out: the generic image's address, which stage0 rescue answers on too.
+#: Never handed out: the generic image's address, which rescue mode answers on too.
 RESERVED_IPS = (BI.DEFAULT_IP,)
-RESERVED_IP_WHY = "the generic image's address and stage0 rescue's"
+RESERVED_IP_WHY = "the generic image's address and rescue mode's"
 RESCUE_NOTE = ("in recovery mode the board still answers on 192.168.10.101 with its default "
                "MAC 02:00:00:4d:50:53, whatever this board is named: look for a board "
                "in recovery mode there")
@@ -122,7 +122,7 @@ ANSWER_TIMEOUT_S = 0.3
 
 
 def answering(ip: str) -> bool:
-    """Something answers identify (UDP 6899) at ``ip`` now: a harness, or stage0 rescue."""
+    """Something answers identify (UDP 6899) at ``ip`` now: a harness, or rescue mode."""
     from . import identify as _identify
 
     try:
@@ -722,7 +722,7 @@ class Mps3NetIdentity:
             except (UnreachableError, UsageError):
                 reply = None
             if reply is not None and getattr(reply, "is_rescue", False):
-                reply = None                     # stage0 rescue: not the harness yet
+                reply = None                     # rescue mode: not the harness yet
             if reply is None and elapsed >= self.broadcast_after_s \
                     and elapsed - last_broadcast >= self.broadcast_every_s:
                 last_broadcast = elapsed

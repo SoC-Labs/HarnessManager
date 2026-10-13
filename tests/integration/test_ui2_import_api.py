@@ -75,7 +75,7 @@ def test_a_receipt_imports_through_kit_pack_with_the_five_groups(board, tmp_path
     assert body["name"] == "spike_rm" and body["rm_id"] == "0x010080F0"
     assert [g["id"] for g in body["groups"]] == GROUP_IDS
     assert [g["title"] for g in body["groups"]] == [
-        "Files", "Same shell", "rm_id in the user range", "CRC and sizes",
+        "Files", "Same shell", "Design number in the user range", "CRC and sizes",
         "Clearing pairs with the partial"]
     assert groups(body)["shell"] == "ok" and groups(body)["crc"] == "ok"
     assert body["imported"]["rm_id"] == "0x010080f0"

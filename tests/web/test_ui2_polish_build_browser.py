@@ -110,7 +110,7 @@ def test_build_walks_setup_design_build_check_add_on_the_demo_linux_board(
     expect_panel(page, "design", "current")
     expect(page.locator('[data-testid="build-design"] .choice.on')).to_have_attribute("data-design", "minimal")
     expect(by_id(page, "design-refused")).to_have_count(0)
-    expect(by_id(page, "wrapper-rm-id")).to_contain_text(f"rm_id {MINIMAL_RM_ID}")
+    expect(by_id(page, "wrapper-rm-id")).to_contain_text(f"design number {MINIMAL_RM_ID}")
     pb = by_id(page, "bd-pblock")
     expect(pb).to_contain_text("pblock_rp_dut")
     expect(pb.locator('[data-meter="LUT"]')).to_contain_text("42,824")

@@ -12,7 +12,7 @@ harness type guessed from a missing one (PANEL-TRUTH: the Linux harness rc2_v6 h
 | ``clcd_kvm`` without ``panel`` (bare metal v0.11, Linux before R1-R3) | ``display`` query: the owner only | REBUILT from what HM read | UNAVAILABLE, with the reason | UNAVAILABLE, with the reason |
 | neither | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE |
 
-``locate()`` gates on its own bit: the Linux harness images rc2_v7/v7n report ``locate``
+``locate()`` gates on its own bit: the Linux release rc2_v7/v7n report ``locate``
 without ``presence``/``panel`` (R1/R2 are not in them), so Identify works there while the
 state and the mirror follow the ``clcd_kvm`` row (lane LOCATE).
 
@@ -150,7 +150,7 @@ def _declined(reply: dict[str, Any], capability: str, what: str) -> HarnessError
         return UnavailableError(capability, f"the harness declined {what}: {err}")
     if code == "invalid":
         return UsageError(f"the harness refused {what}: {err}",
-                          hint="Harness Manager sent something this harness image does not "
+                          hint="Harness Manager sent something this release does not "
                                "accept; nothing changed on the board")
     if code == "locked":
         return ClaimLockedError(f"the harness refused {what}: {err}",

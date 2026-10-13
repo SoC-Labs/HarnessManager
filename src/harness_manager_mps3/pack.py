@@ -360,7 +360,7 @@ class Mps3Session(BoardSession):
             ident = self.shell.identity()
             self._note_features(ident)
             return ident
-        except ShellRescueError as exc:      # stage0 rescue: report what stage0 said (T12-2)
+        except ShellRescueError as exc:      # rescue mode: report what stage0 said (T12-2)
             return exc.identity
         except SwapSettlingError:            # our failed push: the hub's refusal is the swap
             raise

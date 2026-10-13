@@ -118,7 +118,7 @@ def test_negative_twin_the_fielded_harness_has_no_xvc_dbgbr(tmp_path):
             session = eng.open(cand)
             info = eng.info(cand.board_id)
             assert C.DEBUG_FABRIC not in info.capabilities
-            assert info.unavailable[C.DEBUG_FABRIC] == "needs harness firmware with 'xvc_dbgbr'"
+            assert info.unavailable[C.DEBUG_FABRIC] == "needs a release with 'xvc_dbgbr'"
             with pytest.raises(UnavailableError) as exc:
                 eng.xvc.open(session, byo=True)
             assert "xvc_dbgbr" in exc.value.reason

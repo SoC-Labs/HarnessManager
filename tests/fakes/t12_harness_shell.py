@@ -20,7 +20,7 @@ net-protocol.md v0.11 on ``feat/rm-ila-mint``):
   keeps the parked client until the swap's 30 s idle timeout, and closes extras).
   ``refuse_clients_for(s)`` starts the same window by hand (a push that failed on
   the host side, which the fake cannot see);
-- ``mode="rescue"``: stage0 rescue: identify answers ``mode:"rescue"`` + ``reason``,
+- ``mode="rescue"``: rescue mode: identify answers ``mode:"rescue"`` + ``reason``,
   and NOTHING listens on 6900/6910/6930-6932;
 - the UDP identify responder (``tests.fakes.fake_identify``).
 
@@ -162,7 +162,7 @@ class HarnessFakeShell(FakeShell):
             self._install_refusal()
             return self
         if self.mode == "rescue":
-            # stage0 rescue: no TCP service at all. Keep the control port a port that
+            # rescue mode: no TCP service at all. Keep the control port a port that
             # REFUSES, so a client aimed at it sees nothing there.
             if not self.control_port:
                 self.control_port = _free_tcp_port(self.host)

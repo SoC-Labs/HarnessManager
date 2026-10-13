@@ -23,7 +23,7 @@ wizard needs around them:
   folder manifest's) names it, and every write of it needs the typed ``INSTALL UNSIGNED
   <first 8 hex>`` (``require_unsigned``; ``--yes`` never implies it);
 - ``witness``: after the REBOOT, wait for the harness to answer at its address (the pack's
-  probe of that one host: 6900 ping, else UDP identify, which also finds stage0 RESCUE);
+  probe of that one host: 6900 ping, else UDP identify, which also finds rescue mode);
 - ``status``: the switches the wizard shows (``bringup.sd_flash``, the network OS door, the
   signing keys) and the default address;
 - ``propose_identity``: what the new board should be called (david 2 Oct, D4a: a generic image,
@@ -63,7 +63,7 @@ from harness_manager.core.pack import ProbeHints
 from harness_manager.services import unsigned as _unsigned
 
 #: Where a new board's harness answers: the image's default address (the Linux harness keeps
-#: it as a permanent secondary under DHCP, and stage0 RESCUE answers there).
+#: it as a permanent secondary under DHCP, and Rescue mode answers there).
 DEFAULT_HOST = "192.168.10.101"
 #: This PC's side of that network (USER_GUIDE §3.1 step 5).
 PC_ADDRESS_HINT = ("this PC needs an Ethernet port on the board's network: give it an address "
@@ -78,7 +78,7 @@ SD_FLASH_ON = frozenset({"on", "true", "1", "yes"})
 SD_FLASH_OFF_REASON = (f"off: turn on {SD_FLASH_SETTING} in Settings (or set "
                        f"{SD_FLASH_ENV}=on) to write a card in this PC's card reader")
 RESCUE_NETWORK_REASON = "comes with Linux v2.1"
-RESCUE_NETWORK_NOTE = "stage0 rescue boots an image from RAM; it does not write the card"
+RESCUE_NETWORK_NOTE = "Rescue mode boots a release from RAM; it does not write the card"
 #: The Linux OS step writes a WHOLE-CARD image (SD-FLASH kind ``card``): the MBR at LBA 0, the
 #: boot-select at LBA 1-2, the slots where its MBR entries 1 and 2 say (layout v1 or v2). A slot image (linux_slot.img,
 #: S0LB at its start) written at byte 0 gives a card that never boots.
@@ -387,7 +387,7 @@ def network_check(host: str) -> dict[str, Any] | None:
 def ethernet(engine: Any, host: str = DEFAULT_HOST, *, timeout_s: float = 1.5,
              check_network: bool = False) -> dict[str, Any]:
     """Whether a harness answers at ``host``: the pack's probe of that one address (6900
-    ping, then UDP identify, which also finds stage0 RESCUE). Never broadcasts.
+    ping, then UDP identify, which also finds rescue mode). Never broadcasts.
     ``check_network``: when nothing answers, add this PC's network check (``network``,
     Windows only)."""
     from harness_manager.cli.output import jsonable
@@ -413,7 +413,7 @@ def ethernet(engine: Any, host: str = DEFAULT_HOST, *, timeout_s: float = 1.5,
             "candidate": jsonable(cand),
         }
         what = " ".join(x for x in (out["impl"], out["harness"]) if x)
-        out["text"] = (f"stage0 RESCUE answers at {host}: no bootable OS slot (TFTP and "
+        out["text"] = (f"Rescue mode answers at {host}: no bootable OS slot (TFTP and "
                        "identify only)" if rescue else
                        f"a harness answers at {host}" + (f": {what}" if what else ""))
         return out

@@ -14,7 +14,7 @@ and ``stats.lcd_mirror``; all three appear only while the mirror is configured (
 in the order a user fixes them:
 
 1. bare metal: ``needs the Linux harness with lcd_mirror``;
-2. Linux without the engine: ``the Live display needs a harness image with lcd_mirror (this
+2. Linux without the engine: ``the Live display needs a release with lcd_mirror (this
    image has none...)``;
 3. a board behind a hub whose lease is not yours (D3): the holder is named;
 4. an unclaimed board, or no SSH: the claim hint.
@@ -138,7 +138,7 @@ NEEDS_LINUX = "needs the Linux harness with lcd_mirror (this board runs the {imp
 #: called bare metal: it is said as it is.
 NEEDS_LINUX_UNKNOWN = ("needs the Linux harness with lcd_mirror (this harness does not say "
                        "which it is)")
-NO_ENGINE = ("the Live display needs a harness image with lcd_mirror (this image has none: its "
+NO_ENGINE = ("the Live display needs a release with lcd_mirror (this image has none: its "
              "version.features does not name it); update the board's Linux image")
 CLAIM_HINT = ("needs a claimed board: the live display is reached over SSH with your claimed "
               "key (`harness-manager board claim TARGET`, or `--adopt` for a claim made "

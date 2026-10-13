@@ -187,7 +187,7 @@ async function stop(bid) {
   c.busy = "";
   c.actionError = r.error;
   c.line = r.line;
-  log(r.error ? "error" : "info", "checks", r.error ? `${r.line}  ${r.error.message}` : `${r.line}: finishing the check, then greybox`, bid);
+  log(r.error ? "error" : "info", "checks", r.error ? `${r.line}  ${r.error.message}` : `${r.line}: finishing the check, then the empty design`, bid);
   if (!r.error && c.status) c.status.run = r.data.data.run;
   changed();
 }
@@ -243,7 +243,7 @@ function StartForm({ bid }) {
     <div class="field checks-field"><label>Writes</label>
       <div class="seg" role="group" aria-label="Writes">
         ${[["none", "Read only", "Reads the board, the hub and HM's state: nothing changes"],
-          ["safe", "Safe", "Also the swap-and-restore checks and the MCC read; greybox is put back"]].map(([v, label, title]) => html`
+          ["safe", "Safe", "Also the swap-and-restore checks and the MCC read; the empty design is put back"]].map(([v, label, title]) => html`
           <button type="button" key=${v} aria-pressed=${f.writes === v ? "true" : "false"} title=${title}
             data-testid=${`checks-writes-${v}`} onClick=${() => set(bid, "writes", v)}>${label}</button>`)}
       </div></div>
@@ -317,8 +317,8 @@ function stateChip(run) {
 
 function nowText(run) {
   if (run.state === "scheduled") return `Starts at ${clock(epochOf(run.start_at))}; nothing is sent before then.`;
-  if (run.state === "stopping") return "Stopping: finishing the check, then greybox and REPORT.md.";
-  if (run.phase === "end state") return "Putting greybox back and reading it back.";
+  if (run.state === "stopping") return "Stopping: finishing the check, then the empty design and REPORT.md.";
+  if (run.phase === "end state") return "Putting the empty design back and reading it back.";
   if (run.check) return html`Checking <b>${run.check.id}</b> ${run.check.title}`;
   if (run.last_check && run.phase === "checks") {
     return html`Last check <b>${run.last_check.id}</b> ${run.last_check.title}: ${run.last_check.verdict}`;
@@ -341,7 +341,7 @@ function RunPanel({ bid, run }) {
       <span class="grow"></span>
       <button type="button" class="btn danger" data-action="checks-stop" data-testid="checks-stop"
         disabled=${run.stop_requested || !!c.busy} aria-busy=${c.busy === "stop" ? "true" : undefined}
-        title="Finish the check it is on, put greybox back, write REPORT.md" onClick=${() => stop(bid)}>
+        title="Finish the check it is on, put the empty design back, write REPORT.md" onClick=${() => stop(bid)}>
         ${c.busy === "stop" ? html`<${Spinner} />` : html`<${Icon} name="square" />`}
         ${run.state === "scheduled" ? "Cancel" : run.stop_requested ? "Stopping..." : "Stop"}</button>
     </div>

@@ -102,7 +102,7 @@ def test_the_token_moves_from_the_url_into_session_storage(page_factory, daemon)
     page.wait_for_selector(".board-item", timeout=T)
     assert "token" not in page.url
     assert page.evaluate("sessionStorage.getItem('harness_manager.token')") == daemon.token
-    assert page.locator('[data-testid="daemon-line"]').inner_text().startswith("harness-manager-daemon")
+    assert page.locator('[data-testid="daemon-line"]').inner_text().startswith("background service")
     assert page.errors == []
 
 

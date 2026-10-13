@@ -28,7 +28,7 @@ export const ARM_TEXT = {
   reset_dut: "Arm: I understand this resets the DUT CPU (the harness keeps running).",
   reboot: "Arm: I understand this restarts the whole board; every session, console and loaded overlay is lost.",
   power_cycle: "Arm: I understand this cuts the board's power; everything on it stops and it boots from its SD.",
-  restore: "Arm: I understand this swaps the partition to the greybox; the DUT stops.",
+  restore: "Arm: I understand this swaps the partition to the empty design (greybox); the DUT stops.",
   reset_shell: "Arm: I understand every console and the debug session drop while the shell restarts.",
   warm_reset: "Arm: I understand this restarts the whole board like its reset button; every console and the DUT restart, and the debug session drops.",
   mcc_reboot: "Arm: I understand this powers the board off and on through its controller; everything on it stops and it boots again (2 to 3 minutes).",
@@ -68,7 +68,7 @@ export const RESET_DUT_GATE = { capability: "reset_dut", adapter: "resets", arm:
 
 export function rebootSpec(bid) {
   return {
-    key: "reboot", label: "Reboot board", busyLabel: "Rebooting...", budgetS: REBOOT_BUDGET_S,
+    key: "reboot", label: "Power-cycle", busyLabel: "Power-cycling...", budgetS: REBOOT_BUDGET_S,
     command: "mcc reboot",
     run: (ctx) => runJob("reboot", { bid }, {},
       (d) => ctx.progress(`reboot: ${d.phase} (${d.done}/${d.total})`, d.phase), "reboot"),
@@ -151,7 +151,7 @@ function powerCycleSpec(bid, device) {
   const b = boardState(bid);
   const off = offSeconds(b);
   return {
-    key: "power_cycle", label: "Power-cycle", busyLabel: "Cycling...", budgetS: off + 60,
+    key: "power_cycle", label: "Cut power", busyLabel: "Cutting power...", budgetS: off + 60,
     command: `power cycle --off ${off}${device ? ` (${device})` : ""}`,
     run: (ctx) => runJob("powerCycle", { bid }, { off_s: off }, (d) => ctx.progress(`outlet ${d.phase}`, d.phase), "power_cycle"),
     render: cycleLines,
@@ -162,10 +162,10 @@ function powerCycleSpec(bid, device) {
 
 function restoreSpec(bid) {
   return {
-    key: "restore", label: "To greybox", busyLabel: "Swapping...", budgetS: 120, command: "restore",
+    key: "restore", label: "Restore baseline", busyLabel: "Swapping...", budgetS: 120, command: "restore",
     run: (ctx) => runJob("restore", { bid }, undefined,
       (d) => ctx.progress(`${d.phase || "restore"}${d.total > 1 ? `: ${Math.floor((d.done * 100) / d.total)}%` : ""}`, d.phase), "restore"),
-    render: (r) => [{ kind: "ok", text: r && r.rm_name ? `the partition runs ${r.rm_name}${r.verified ? " (verified)" : ""}` : "greybox restored" }],
+    render: (r) => [{ kind: "ok", text: r && r.rm_name ? `the partition runs ${r.rm_name}${r.verified ? " (verified)" : ""}` : "the empty design is back" }],
     renderError: heldLines,
     onDone: () => scheduleRefresh(bid, 200),
   };
@@ -262,7 +262,7 @@ const VIA = { hub: "through the hub's Debug USB", pc: "through this PC's Debug U
 // What the design comes back as after a cold start: the card's power-on default, else greybox.
 function comesBackAs(b) {
   const d = b.card && b.card.default;
-  return d && d.rm_name ? `${d.rm_name} (kept on the card)` : "greybox";
+  return d && d.rm_name ? `${d.rm_name} (kept on the card)` : "the empty design";
 }
 
 function isGreybox(b) {
@@ -297,39 +297,39 @@ export function recoverSteps(bid) {
     { k: "reset", key: "reset_dut", panel: "reset_dut", sev: 1, t: "Reset DUT", bt: "Reset DUT", icon: "rotate-ccw",
       testid: "reset-dut", result: "reset-dut-result", arm: "arm-reset-dut",
       sh: "Pulses the DUT's reset; all else stays.", time: "~1 s",
-      d: "Pulses the DUT's reset through the harness. The harness, consoles and design stay; the boot banner prints on the Workbench console.",
+      d: "Pulses the DUT's reset through the harness. The harness, consoles and design stay; the boot banner prints on the Workbench console. The same Reset DUT button sits beside the DUT console.",
       keep: K(["lost", "restarts from its reset vector"], ["kept"], ["kept"], ["kept"], ["kept"]),
       spec: resetDutSpec(bid, "dut"), gate: RESET_DUT_GATE },
-    { k: "greybox", key: "restore", panel: "rc_greybox", sev: 2, t: "Back to greybox", bt: "To greybox", icon: "undo-2",
+    { k: "greybox", key: "restore", panel: "rc_greybox", sev: 2, t: "Restore baseline", bt: "Restore baseline", icon: "undo-2",
       testid: "rung-greybox", result: "greybox-result", arm: "arm-greybox",
       sh: "Swaps in the baseline; the shell runs on.", time: "~40 s",
-      d: "Swaps the partition to the baseline design (greybox): the gentlest design-level step. The shell keeps running.",
-      keep: K(["lost"], ["kept", "the DUT console goes quiet: greybox has no CPU"], ["lost", "greybox until you program again"], ["kept"], ["kept", "the shell stays"]),
-      no: isGreybox(b) ? "already greybox" : "",
+      d: "Swaps the partition to the baseline, the empty design (greybox): the gentlest design-level step. The shell keeps running. This is the same step as Restore baseline on the Workbench.",
+      keep: K(["lost"], ["kept", "the DUT console goes quiet: the empty design has no CPU"], ["lost", "the empty design until you program again"], ["kept"], ["kept", "the shell stays"]),
+      no: isGreybox(b) ? "already the empty design" : "",
       spec: restoreSpec(bid), gate: { capability: "deploy_partial", arm: "rc_greybox", holder: "Restore baseline" } },
     { k: "restart", key: "reset_shell", panel: "reset_shell", sev: 3, t: "Restart the shell", bt: "Restart", icon: "refresh-cw",
       testid: "reset-shell", result: "reset-shell-result", arm: "arm-reset-shell",
-      sh: lx ? "Restarts the board's Linux; the FPGA is not reloaded." : "Warm firmware restart; consoles reconnect.",
+      sh: lx ? "Restarts the board's Linux; the FPGA is not reloaded." : "Warm restart; consoles reconnect.",
       time: lx ? "~3 min" : "~3 s",
-      d: lx ? `Restarts the board's Linux: the board's watchdog resets it and it boots again (about 3 minutes); the FPGA is not reloaded. ${net ? "This board netboots, so it waits in stage0 rescue until its image is pushed again; it does not come back by itself. " : ""}Consoles and debug drop${net ? "" : ", then reconnect by themselves"}. The design stays loaded but held in reset until you program once.`
-        : "Restarts the harness firmware (warm; the FPGA is not reloaded). Consoles and debug drop, then reconnect; the design stays loaded.",
+      d: lx ? `Restarts the board's Linux: the board's watchdog resets it and it boots again (about 3 minutes); the FPGA is not reloaded. ${net ? "This board netboots, so it waits in rescue mode until its release is pushed again; it does not come back by itself. " : ""}Consoles and debug drop${net ? "" : ", then reconnect by themselves"}. The design stays loaded but held in reset until you program once.`
+        : "Restarts the harness (warm; the FPGA is not reloaded). Consoles and debug drop, then reconnect; the design stays loaded.",
       keep: K(["lost"],
-        lx ? (net ? ["lost", "drop and stay down until the image is pushed again"] : ["back", "drop for ~3 min, then reconnect"]) : ["back", "drop for ~3 s, then reconnect"],
+        lx ? (net ? ["lost", "drop and stay down until the release is pushed again"] : ["back", "drop for ~3 min, then reconnect"]) : ["back", "drop for ~3 s, then reconnect"],
         lx ? ["held", "loaded, but held in reset until you program once"] : ["kept"], ["kept"], ["kept"]),
       spec: shellSpec(bid),
       gate: { capability: "reset_shell", adapter: "resets", arm: "reset_shell", holder: "Restart shell", guard: shellGuard } },
-    { k: "reboot", key: "reboot", panel: "reboot", sev: 4, t: "Reboot via the MCC", bt: "Reboot", icon: "power",
+    { k: "reboot", key: "reboot", panel: "reboot", sev: 4, t: "Power-cycle the board (through its MCC)", bt: "Power-cycle", icon: "power",
       testid: "reboot-card", result: "reboot-result", arm: "arm-reboot",
       sh: lx ? "Cold: the FPGA reloads, then Linux boots." : "Cold: the FPGA reloads from the config SD.",
       time: lx ? "~190 s" : "~60 s",
-      d: lx ? `Cold: the MCC reloads the FPGA from the config SD${via ? ` ${via}` : ""}, then Linux boots through stage0 (~190 s to the control port). ${net ? "This board netboots, so it waits in stage0 rescue until the hub pushes its image again." : `The design comes back as ${back}.`}`
+      d: lx ? `Cold: the MCC reloads the FPGA from the config SD${via ? ` ${via}` : ""}, then Linux boots through stage0 (~190 s to the control port). ${net ? "This board netboots, so it waits in rescue mode until the hub pushes its release again." : `The design comes back as ${back}.`}`
         : `Cold: the MCC reloads the FPGA from the config SD${via ? ` ${via}` : ""} (~60 s). The design comes back as ${back}.`,
       keep: K(["lost"], ["back", `drop for ${lx ? "~3 min" : "~1 min"}, then reconnect`], ["lost", `comes back as ${back}`],
         ["kept", "the hub lease is the hub's: a reboot does not touch it"], ["reload", "reloaded from the config SD"]),
       note: route === "self" ? "Through the board's own loop: it works while the harness runs. A wedged board cannot reboot itself; then power-cycle it, or press PB0 at the board." : "",
       fix: route === "none" ? "Connect J8 (Debug USB) to the hub or to this PC." : "",
       spec: rebootSpec(bid), gate: { ...REBOOT_GATE, guard } },
-    { k: "power", key: "power_cycle", panel: "power_cycle", sev: 5, t: "Power-cycle", bt: "Power-cycle", icon: "plug-zap",
+    { k: "power", key: "power_cycle", panel: "power_cycle", sev: 5, t: "Cut the power (networked plug)", bt: "Cut power", icon: "plug-zap",
       testid: "power-card", result: "power-result", arm: "arm-power",
       sh: "Cuts the power: MCC and FPGA start cold.", time: lx ? "~4 min" : "~90 s",
       d: `Cuts the power${pw && pw.device ? ` through ${pw.device}` : " with a networked plug"}: the MCC and the FPGA start from nothing.`,
@@ -357,7 +357,7 @@ export function recoverSteps(bid) {
       k: "mccreboot", key: "mcc_reboot", panel: "mcc_reboot", t: "Power-cycle the board (through its MCC)",
       bt: "Power-cycle", icon: "power", testid: "mcc-reboot-card", result: "mcc-reboot-result", arm: "arm-mcc-reboot",
       sh: "Cold: the controller powers the board off and on.", time: "2-3 min",
-      d: `The board asks its own controller to power it off and on: the FPGA reloads from the config SD and ${lx ? "Linux boots again" : "the firmware starts again"} (2 to 3 minutes). It needs no Debug USB cable. ${net ? "This board netboots, so it waits in stage0 rescue until its image is pushed again." : `The design comes back as ${back}.`}`,
+      d: `The board asks its own controller to power it off and on: the FPGA reloads from the config SD and ${lx ? "Linux boots again" : "the release starts again"} (2 to 3 minutes). It needs no Debug USB cable. ${net ? "This board netboots, so it waits in rescue mode until its release is pushed again." : `The design comes back as ${back}.`}`,
       keep: K(["lost"], ["back", "drop for ~3 min, then reconnect"], ["lost", `comes back as ${back}`],
         ["kept", "the hub lease is the hub's: this does not touch it"], ["reload", "reloaded from the config SD"]),
       note: "Done only when the controller confirms the restart and the board returns running the same design. A board that is wedged cannot ask; then use the plug, or press PB0 at the board.",

@@ -302,7 +302,7 @@ def default_os_slots(session: Any) -> OsSlotAdapter | None:
     """``session.os_slots`` when the pack provides it AND it can be used now (CCR T7-2).
 
     An adapter says why it cannot in ``slots_reason()`` (a bare-metal harness, no card,
-    stage0 rescue): then the board has no OS-slot door, as if there were no adapter.
+    rescue mode): then the board has no OS-slot door, as if there were no adapter.
     """
     slots = getattr(session, "os_slots", None)
     if slots is None:

@@ -143,7 +143,7 @@ def test_swo_is_fixed_by_the_harness_and_uart1_has_no_rate(page_factory):
     page.locator('[data-console-tab="swo"]').click()
     swo = page.locator('[data-testid="console-swo"] [data-testid="baud"]')
     expect(swo).to_contain_text("2000000")
-    expect(swo).to_contain_text("fixed by the harness firmware")
+    expect(swo).to_contain_text("fixed by the release")
     page.locator('[data-console-tab="uart1"]').click()
     uart1 = page.locator('[data-testid="console-uart1"] [data-testid="baud"]')
     expect(uart1).to_contain_text("no rate")                                  # never a 0

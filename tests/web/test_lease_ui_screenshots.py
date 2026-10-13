@@ -79,7 +79,7 @@ def test_lease_review_screenshots_demo(showcase, review, scheme):
     shoot(page, review, "yours", scheme)
 
     page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
-    expect(by_id(page, "release-title")).to_have_text("Release mps3_03?")      # LEASE-BOARD
+    expect(by_id(page, "release-title")).to_have_text("Give back mps3_03?")      # LEASE-BOARD
     shoot(page, review, "release-confirm", scheme)
     page.locator('[data-action="release_cancel"]').click()
 

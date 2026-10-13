@@ -50,12 +50,12 @@ function SlotTile({ id, os }) {
     const len = job.len || job.length || 0;
     const p = pct(job.got || 0, len);
     chip = ["accent", "loader-circle", `${job.state === "writing" ? "Writing" : "Reading back"} ${p}%`];
-    line = job.text || (job.state === "writing" ? `${mb(job.got)} of ${mb(len)}; the old image is gone until this ends` : "the board checks every region's CRC");
+    line = job.text || (job.state === "writing" ? `${mb(job.got)} of ${mb(len)}; the old release is gone until this ends` : "the board checks every region's CRC");
     cls = "busy";
     meter = p;
   } else if (!s.state || s.state === "empty") {      // a valid image need not carry a version record (v2.0.0)
     chip = ["warn", "triangle-alert", s.err ? "Empty: torn write" : "Empty"];
-    line = s.err || "no image: nothing boots from it";
+    line = s.err || "no release: nothing boots from it";
     cls = "torn";
   } else if (os.fell_back === id) {
     chip = ["err", "circle-x", "Did not boot"];
@@ -165,9 +165,9 @@ function OverlayStore({ bid }) {
     renderError: heldLines, onDone: () => afterCardJob(bid),
   };
   return html`<div class="stack gap-8" data-testid="overlay-store">
-    <div class="os-store"><${Icon} name="layers" cls="sm" /><span>Overlay store: boots <b>${d && d.rm_name ? d.rm_name : "greybox"}</b> at power-on${d && d.rm_name ? ` (kept, slot ${d.slot || "?"})` : " (nothing kept)"}.</span></div>
+    <div class="os-store"><${Icon} name="layers" cls="sm" /><span>Overlay store: boots <b>${d && d.rm_name ? d.rm_name : "the empty design"}</b> at power-on${d && d.rm_name ? ` (kept, slot ${d.slot || "?"})` : " (nothing kept)"}.</span></div>
     ${d && d.rm_name ? html`<${Drive} bid=${bid} panel="card" spec=${clear} armTestid="arm-card-clear"
-        gate=${{ arm: "card_clear", holder: "Clear the card default" }} armText="Arm: the greybox loads at the next power-on." icon="x" />`
+        gate=${{ arm: "card_clear", holder: "Clear the card default" }} armText="Arm: the empty design loads at the next power-on." icon="x" />`
       : c.committable ? html`<${Drive} bid=${bid} panel="card" spec=${commit} armTestid="arm-card-commit"
         gate=${{ arm: "card_commit", holder: "Keep on the card" }} armText="Arm: the running design loads at every power-on." icon="layers" />` : null}
   </div>`;
@@ -226,13 +226,13 @@ function NetbootHere({ bid }) {
   const why = (b.slots && b.slots.reason) || (b.card && b.card.reason) || "";
   const hub = b.week && b.week.hub;
   return html`<${Card} title="Netboot" icon="server" cls="os-here" testid="os-here"
-      sub="No user microSD: the hub serves the image at every cold boot.">
+      sub="No user microSD: the hub serves the release at every cold boot.">
     <div class="os-net" data-testid="os-netboot">
       <div class="os-net-h"><${Icon} name="server" /><b>${hub ? `From ${hub.host}` : "From the hub"}</b><${Chip} level="plain">no OS slots<//></div>
-      <div class="small secondary">Runs harness ${id.harness_version || "?"} in RAM. At every cold boot stage0 waits in rescue and the hub pushes the image over TFTP. <span class="mono">/persist</span> is tmpfs: nothing on the board survives a reboot.</div>
+      <div class="small secondary">Runs harness ${id.harness_version || "?"} in RAM. At every cold boot stage0 waits in rescue and the hub pushes the release over TFTP. <span class="mono">/persist</span> is tmpfs: nothing on the board survives a reboot.</div>
       ${why ? html`<div class="small muted">${why}</div>` : null}
     </div>
-    <div class="bt-foot"><span class="small muted">Roll back: ask for the previous image (a release's Ask for it…).</span>
+    <div class="bt-foot"><span class="small muted">Roll back: ask for the previous release (a release's Ask for it…).</span>
       <span class="grow"></span><button type="button" class="link-btn" onClick=${() => openActivity(bid)}>History in Activity</button></div>
   <//>`;
 }
@@ -299,7 +299,7 @@ export function versionsStatus(bid) {
   if (os && os.fell_back) return [`slot ${os.fell_back} did not boot`, "warn", `Slot ${os.fell_back} failed to boot; ${os.running} runs as the fallback`];
   // The slot tile's own rule (:46): a slot is empty by its STATE; a valid image may carry no version record.
   const empty = os && ["A", "B"].find((x) => { const sl = (os.slots || {})[x] || {}; return !sl.state || sl.state === "empty"; });
-  if (empty) return [`slot ${empty} is empty`, "warn", `Slot ${empty} holds no image`];
+  if (empty) return [`slot ${empty} is empty`, "warn", `Slot ${empty} holds no release`];
   if (!b.info) return ["not read yet", null, "The board has not been read yet"];
   const ver = identityOf(b).harness_version || "?";
   const offered = offeredText(bid);

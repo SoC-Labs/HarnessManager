@@ -79,9 +79,9 @@ FORGET_JOBS = {"reboot": "the board rebooted (MCC REBOOT)",
                "power_cycle": "the board was power cycled",
                "sd_install": "the board's SD card was written",
                "sd_restore": "the board's SD card was restored",
-               "update_harness": "the harness image was updated",
-               "update_rollback": "the harness image was rolled back",
-               "harness_rollback": "the harness image was rolled back"}
+               "update_harness": "the release was updated",
+               "update_rollback": "the release was rolled back",
+               "harness_rollback": "the release was rolled back"}
 #: ``GET display.png``: how long a first picture may take (the upstream opens, KEY, keyframe).
 #: FIX-PACK-1: 30 s, the CLI's too: a cold SSH forward through the hub took most of 10 s.
 PICTURE_WAIT_S = 30.0

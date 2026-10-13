@@ -171,7 +171,7 @@ def test_force_confirm_is_red_names_the_holder_and_cancel_runs_nothing(page_fact
     page, bar = requester(page_factory, daemon)
     answered_then_ran_out(daemon)                  # an HM holder: no name to type (D12)
     expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
-    expect(force_button(page)).to_have_text("Force release…")
+    expect(force_button(page)).to_have_text("Force give back…")
     force_button(page).click()
     modal = page.locator('[data-testid="force-confirm"]')
     expect(modal).to_be_visible()
@@ -577,7 +577,7 @@ def test_over_rest_the_holder_prompt_has_no_message_box_and_no_keep_and_says_why
     assert prompt.locator('[data-testid="wanted-message"]').count() == 0
     assert prompt.locator('[data-action^="respond_keep_"]').count() == 0
     expect(prompt.locator('[data-testid="wanted-notes-off"]')).to_contain_text(NOTES_OFF)
-    expect(prompt.locator('[data-testid="wanted-notes-off"]')).to_contain_text("Release now still works")
+    expect(prompt.locator('[data-testid="wanted-notes-off"]')).to_contain_text("Give back now still works")
     prompt.locator('[data-action="respond_release"]').click()
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to bob@lab-pc-02", timeout=T)
 

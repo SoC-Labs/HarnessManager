@@ -16,7 +16,7 @@
    pack's MBBIOS rule, written and read back. Refused with the reason while
    ``bringup.sd_flash`` is off;
 4. the MCC reboot (asks first), then the witness: the harness answers at ``--host`` (default
-   192.168.10.101) within ``--wait`` seconds, or stage0 RESCUE does (a Linux harness with no
+   192.168.10.101) within ``--wait`` seconds, or rescue mode does (a Linux harness with no
    bootable OS slot: write the user microSD with a whole-card image). With the card reader
    there is NO MCC reboot: the user puts the card back and powers the board on (asks first),
    then the witness.
@@ -60,7 +60,7 @@ bringup - --serial PORT --volume PATH (--bundle DIR|ZIP | --version V [--source 
   bundle (or plan the signed release), back up the configuration SD (mandatory), write it
   (asks first; never an .ebf), reboot through the MCC (asks first), then wait for the
   harness at --host (192.168.10.101) for --wait seconds. A Linux harness with no bootable
-  OS slot answers in stage0 RESCUE: write its user microSD with a whole-card image.
+  OS slot answers in rescue mode: write its user microSD with a whole-card image.
   A bundle is unsigned: type INSTALL UNSIGNED <first 8 hex of its sha256> (or give it
   with --confirm-unsigned). --card-reader DEVICE_ID writes the configuration SD in this
   PC's card reader instead (bringup.sd_flash on; `flash devices` lists the ids): typed
@@ -296,7 +296,7 @@ def _witness(ctx: Any, bid: str, steps: list[list[Any]], data: dict[str, Any], l
     steps.append([bid, "witness", seen["state"], seen["text"]])
     data["witness"] = seen
     if seen["state"] == "rescue":
-        steps.append([bid, "os", "needed", "stage0 RESCUE: write the board's user microSD with "
+        steps.append([bid, "os", "needed", "Rescue mode: write the board's user microSD with "
                                            f"{bringup.CARD_IMAGE_HINT}, or skip if it is "
                                            "prepared; over the network from rescue "
                                            f"{bringup.RESCUE_NETWORK_REASON}"])

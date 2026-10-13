@@ -235,7 +235,7 @@ export function AddHubForm() {
       <div class="form-grid">
         ${rest ? html`<${Field} label="URL" field="url" form=${form} placeholder="the hub's https address, port 7246"
             hint="The hub's web port (7246) takes a token." />`
-          : html`<${Field} label="Host" field="host" form=${form} placeholder="mapstone-dev.ecs.soton.ac.uk"
+          : html`<${Field} label="Host" field="host" form=${form} placeholder="hub.example.org"
               hint='"local" when Harness Manager runs on the hub.' />
             <${Field} label="Group" field="group" form=${form} placeholder="fpga" hint="The fpgahub socket's group (sg)." />
             <${Field} label="Jump host" field="jump" form=${form} placeholder="(none)" hint="Optional: ssh -J." />`}

@@ -69,8 +69,8 @@ function Rail() {
   const conn = S.connection;
   const daemon = conn === "ok" ? (S.eventsUp ? "ok" : "warn") : conn === "unknown" ? "unk" : "err";
   const daemonText = conn === "ok"
-    ? `harness-manager-daemon ${S.version || ""}${S.eventsUp ? "" : " · events reconnecting"}`
-    : conn === "auth" ? "session expired" : conn === "down" ? "harness-manager-daemon not answering" : "connecting...";
+    ? `background service ${S.version || ""}${S.eventsUp ? "" : " · events reconnecting"}`
+    : conn === "auth" ? "session expired" : conn === "down" ? "background service not answering" : "connecting...";
   const errors = unseenErrors();
   return html`<aside class="rail" aria-label="Boards">
     <div class="brand">
@@ -116,7 +116,7 @@ function Rail() {
         ]} />
       <div class="daemon-line" data-testid="daemon-line">
         <span class=${`dot ${daemon}`}></span><span class="grow"
-          title=${S.daemon ? `${S.daemon.service || "harness-manager-daemon"} ${S.daemon.version || ""}, pid ${S.daemon.pid || "?"}` : ""}>${daemonText}</span>
+          title=${S.daemon ? `${S.daemon.service || "background service"} ${S.daemon.version || ""}, pid ${S.daemon.pid || "?"}` : ""}>${daemonText}</span>
       </div>
     </div>
   </aside>`;
@@ -162,15 +162,15 @@ function BackgroundFact({ bid }) {
 function harnessWords(ident, release) {
   const verb = (ident && ident.harness_version) || "";
   if (release) {
-    return { source: "release", text: `release ${release}`, fw: verb && verb !== release ? `firmware ${verb}` : "",
+    return { source: "release", text: `release ${release}`, fw: verb && verb !== release ? `reports ${verb}` : "",
       title: verb && verb !== release
         ? `Release ${release} of the signed harness catalogue: what Update > Harness versions matches this board to. `
-          + `Its firmware reports version ${verb}: the firmware's own number, not the release.`
-        : `Release ${release} of the signed harness catalogue (Update > Harness versions); the firmware reports ${verb || "no version"}.` };
+          + `The board reports version ${verb}: its own number, not the catalogue's release.`
+        : `Release ${release} of the signed harness catalogue (Update > Harness versions); the board reports ${verb || "no version"}.` };
   }
   if (verb) {
-    return { source: "firmware", text: `firmware ${verb}`, fw: "",
-      title: `What the harness firmware reports (its version verb). The catalogue release it belongs to shows here, `
+    return { source: "firmware", text: `release ${verb}`, fw: "",
+      title: `What the board reports (its version verb). The catalogue release it belongs to shows here, `
         + "and in Update > Harness versions, once that list is read." };
   }
   return { source: "unknown", text: "unknown", fw: "", title: "" };
@@ -192,9 +192,9 @@ function HarnessFact({ bid, ident }) {
 // verify: "verified hh:mm". The harness's build check rides the fact's tooltip; only a check
 // that is not OK (mismatch, unchecked) keeps its chip, since it asks for attention.
 const BUILD_WORDS = {
-  ok: "Build check OK: the harness firmware matches the fabric it runs on.",
-  mismatch: "Build check MISMATCH: the harness firmware was built for different fabric.",
-  unchecked: "Build check UNCHECKED: the harness could not compare its firmware with the fabric (not a pass).",
+  ok: "Build check OK: the release matches the fabric it runs on.",
+  mismatch: "Build check MISMATCH: the release was built for different fabric.",
+  unchecked: "Build check UNCHECKED: the harness could not compare its release with the fabric (not a pass).",
 };
 
 function sameId(a, c) { return !!a && !!c && String(a).toLowerCase() === String(c).toLowerCase(); }
@@ -204,7 +204,7 @@ function DesignFact({ bid, ident }) {
   const dep = b.deploy;
   const bar = deployBar(dep);
   const check = ident.build_check || "unchecked";
-  const title = `The design in the partition${ident.rm_id ? ` (rm_id ${ident.rm_id})` : ""}. ${BUILD_WORDS[check] || `Build check ${checkLabel(check)}.`}`;
+  const title = `The design in the partition${ident.rm_id ? ` (design number ${ident.rm_id})` : ""}. ${BUILD_WORDS[check] || `Build check ${checkLabel(check)}.`}`;
   const verified = !bar && dep.state === "done" && dep.verified && sameId(dep.rm_id, ident.rm_id) && dep.doneAt;
   // FIX-PACK-6: after a cold boot the service checks the reported design against the DAP
   // (the design.check event, or GET /boards/{bid}'s design_check); a deploy clears it
@@ -283,7 +283,7 @@ function BoardHeader({ bid }) {
       </div>
       <div class="header-actions">
         <${LastProblemChip} bid=${bid} />
-        ${b.job ? html`<${Chip} level="accent" testid="job-chip" title=${`harness-manager-daemon job ${b.job.id}: the board's other actions wait for it`}>
+        ${b.job ? html`<${Chip} level="accent" testid="job-chip" title=${`background service job ${b.job.id}: the board's other actions wait for it`}>
           <${Spinner} />${jobLabel(b.job.kind)} running · ${Math.floor((Date.now() - b.job.at) / 1000)} s<//>` : null}
         ${row.open ? html`<button type="button" class="btn ghost sm icon-only" data-action="refresh-board"
             aria-label="Read the board again" title="Read the board again (its info, the Card line and the SD journal)"
@@ -335,11 +335,11 @@ function Banners({ bid }) {
   if (S.connection === "auth") {
     out.push(html`<div class="banner err" role="alert" key="auth"><${Icon} name="lock" />
       <div class="grow"><strong>Session expired: run${" "}<code>harness-manager ui</code>${" "}again.</strong>${" "}
-      harness-manager-daemon refused this page's token (it restarted, or the page came from an old link);
+      The background service refused this page's token (it restarted, or the page came from an old link);
       ${" "}<code>harness-manager ui</code>${" "}opens the page with the current one.</div></div>`);
   } else if (S.connection === "down") {
     out.push(html`<div class="banner warn" role="status" key="down"><${Icon} name="unplug" />
-      <div class="grow"><strong>harness-manager-daemon is not answering.</strong>${" "}The page keeps what it
+      <div class="grow"><strong>The background service is not answering.</strong>${" "}The page keeps what it
       last read and retries. Check it with${" "}<code>harness-manager daemon status</code>.</div></div>`);
   }
   if (S.serviceEnv && S.serviceEnv.warning) {
@@ -372,7 +372,7 @@ function Workspace() {
   if (!bid || !S.boards[bid]) {
     if (S.connection === "unknown") {
       return html`<main class="workspace"><div class="section-body"><div class="empty-state"><div>
-        <p class="muted"><${Spinner} /> Connecting to harness-manager-daemon...</p></div></div></div></main>`;
+        <p class="muted"><${Spinner} /> Connecting to the background service...</p></div></div></div></main>`;
     }
     const noBoards = !S.order.length;
     return html`<main class="workspace">

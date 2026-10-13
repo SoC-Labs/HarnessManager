@@ -624,7 +624,7 @@ class OsSlotAdapter(Protocol):
     """``BoardSession.os_slots``: the Linux harness's A/B OS slots (CCR T7-2).
 
     None on a session whose link cannot carry them; an adapter whose ``slots_reason()``
-    is not "" cannot be used now (a bare-metal harness, no card, stage0 rescue). Every
+    is not "" cannot be used now (a bare-metal harness, no card, rescue mode). Every
     mutation raises ``HarnessError``; nothing here ever writes the running or the default
     slot (the board refuses it too).
     """

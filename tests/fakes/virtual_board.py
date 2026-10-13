@@ -379,7 +379,7 @@ class VirtualMps3:
         self.shell.start()
 
     def enter_rescue(self, reason: str = "no bootable OS slot on the microSD") -> None:
-        """stage0 RESCUE: identify answers ``mode:"rescue"``; nothing listens on TCP."""
+        """Rescue mode: identify answers ``mode:"rescue"``; nothing listens on TCP."""
         self.shell.stop()
         self.shell.mode = "rescue"
         self.shell.rescue_reason = reason

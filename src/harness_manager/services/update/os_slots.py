@@ -30,7 +30,7 @@ answers in HARNESS_DISTRIBUTION.md §9)::
 - once the board's SSH is claimed, the mutations are accepted only from the board
   itself: the pack tunnels them over SSH to the board's 127.0.0.1.
 
-Rescue: a Linux board whose card holds no bootable slot comes up in stage0 RESCUE
+Rescue: a Linux board whose card holds no bootable slot comes up in rescue mode
 (``Health.control_channel == "rescue"``: pingable, TFTP 69, identify ``mode:"rescue"``,
 no 6900). Provisioning a slot from there is HARNESS-DIST L3 (not frozen yet): the
 adapter reports rescue in ``slots_reason()`` and refuses.

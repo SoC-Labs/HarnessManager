@@ -286,7 +286,7 @@ def test_info_negotiates_capabilities_from_links_and_features(state: Path):
     info = eng.info("fake@1")
     assert info.capabilities == {"identify"}
     assert info.unavailable == {"reboot_board": "needs the Debug USB cable",
-                                "reset_shell": "needs harness firmware with 'reboot'"}
+                                "reset_shell": "needs a release with 'reboot'"}
     # Twin: a board reporting the feature over a USB link gains both.
     pack2 = FakePack(name="f2", identity=BoardIdentity(board_type="fake", features=("reboot",)))
     eng2 = make(state, pack2)

@@ -80,7 +80,7 @@ class UnavailableError(HarnessError):
     """A capability the current links or firmware cannot provide.
 
     ``capability`` names it; ``reason`` is the exact missing prerequisite,
-    e.g. "needs the Debug USB cable" or "needs harness firmware with 'stats'".
+    e.g. "needs the Debug USB cable" or "needs a release with 'stats'".
     """
 
     code = ExitCode.UNAVAILABLE

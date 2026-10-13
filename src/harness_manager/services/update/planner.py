@@ -723,13 +723,13 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
         # LINUX-SLOTS: the Ethernet door carries an OS image only for the RUNNING static
         # (the board refuses a push provisioned for any other fabric). A Linux release on
         # another static needs its base through the config SD first: the Debug USB or the
-        # hub, then the image through stage0 rescue (HARNESS-DIST L3, not built yet).
+        # hub, then the image through rescue mode (HARNESS-DIST L3, not built yet).
         prov = os_provisioned_static(os_comp, rel)
         if not _same_u32(prov, ident.shell_id):
             why = (f"needs Debug USB or hub: the OS image is provisioned for static {prov}, "
                    f"the board runs {ident.shell_id.lower()}; the Ethernet door carries only "
                    "an image for the running static (the base goes through the config SD "
-                   "first, then the image through stage0 rescue, which is not built yet)")
+                   "first, then the image through rescue mode, which is not built yet)")
             plan.needs_door.append(why)
             plan.blockers.append(why)
 

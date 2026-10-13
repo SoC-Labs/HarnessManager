@@ -57,7 +57,7 @@ def test_negotiate_ethernet_only_explains_what_is_missing():
     avail, unavail = negotiate(SPECS, [LinkKind.ETHERNET], [])
     assert avail == {C.IDENTIFY}
     assert unavail[C.REBOOT_BOARD] == "needs the Debug USB cable"
-    assert unavail[C.RESET_SHELL] == "needs harness firmware with 'reboot'"
+    assert unavail[C.RESET_SHELL] == "needs a release with 'reboot'"
 
 
 def test_negotiate_feature_lights_up_capability():
@@ -76,7 +76,7 @@ def test_route_needing_link_and_feature():
     spec = CapabilitySpec("shell", "S", (via(LinkKind.USB_SERIAL),
                                          via(LinkKind.ETHERNET, features=("shell_console",))))
     avail, unavail = negotiate([spec], [LinkKind.ETHERNET], [])
-    assert not avail and unavail["shell"] == "needs harness firmware with 'shell_console'"
+    assert not avail and unavail["shell"] == "needs a release with 'shell_console'"
     assert negotiate([spec], [LinkKind.ETHERNET], ["shell_console"])[0] == {"shell"}
 
 

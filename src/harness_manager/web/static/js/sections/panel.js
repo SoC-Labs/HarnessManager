@@ -287,7 +287,7 @@ export function touchPart(t) {
 
 function pagePart(p) {
   return p.page ? { text: `${p.page} page`, level: "" }
-    : { text: "page not reported", level: "unk", title: "this harness image does not report which page the panel shows (harness feature 'panel')" };
+    : { text: "page not reported", level: "unk", title: "this release does not report which page the panel shows (harness feature 'panel')" };
 }
 
 // PANEL-TRUTH: the harness type in words, from its own version.impl only ("" when it did not
@@ -297,7 +297,7 @@ export function implWords(support) {
   return { linux: "Linux harness", "bare-metal": "bare-metal harness" }[impl] || "";
 }
 
-// "this Linux harness image" when the harness said what it is, else "this harness image".
+// "this Linux release" when the harness said what it is, else "this release".
 function thisImage(support) {
   const w = implWords(support);
   return `this ${w || "harness"} image`;
@@ -325,7 +325,7 @@ export function notReported(f) {
 // The Board tile's parts: [{text, level, icon, title, key}]. PANEL-TRUTH: a page the image
 // does not report is left out (the Front panel card lists what is not reported).
 export function lineParts(f) {
-  if (f.unsupported) return [{ key: "none", text: "this harness-manager-daemon has no front-panel routes", level: "unk", icon: "circle-slash" }];
+  if (f.unsupported) return [{ key: "none", text: "this background service has no front-panel routes", level: "unk", icon: "circle-slash" }];
   if (f.error && !f.body) return [{ key: "err", text: `${f.error.errName}: ${f.error.message}`, level: "err", icon: "circle-x" }];
   // FIX-PACK-1: held back before the first read: say so (the Board tile has Read now).
   if (!f.body && f.quiet) return [{ key: "quiet", text: "not read", level: "unk", icon: "circle-pause", title: quietWords(f.quiet) }];
@@ -353,7 +353,7 @@ function RebuiltTag({ f, testid }) {
 
 export function identifyWhy(bid) {
   const f = front(bid);
-  if (f.unsupported) return "Cannot: this harness-manager-daemon has no front-panel routes";
+  if (f.unsupported) return "Cannot: this background service has no front-panel routes";
   if (!f.body) {
     if (f.error) return `Cannot: ${f.error.message}`;
     return f.quiet ? `Not read yet: ${quietWords(f.quiet)}` : "reading the panel...";

@@ -14,7 +14,7 @@ import { Card, Chip, Icon, Reason, Seg, Spinner } from "../ui.js";
 function explain(err) {
   const e = toApiError(err);
   if (e.status === 404 && /\/xdc\b/.test(e.message || "")) {
-    return new ApiError({ name: "UNAVAILABLE", message: "this harness-manager-daemon has no XDC routes yet",
+    return new ApiError({ name: "UNAVAILABLE", message: "this background service has no XDC routes yet",
       hint: "update Harness Manager (the XDC export arrived with team T10)" }, 404);
   }
   return e;
