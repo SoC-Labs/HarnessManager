@@ -148,7 +148,6 @@ def test_designs_with_a_dap(design, configs):
 
 
 @pytest.mark.parametrize("design, words", [
-    (0x0003, "two-AP config not available yet"),
     (0x0000, "greybox"),
     (0x001E, "led"),
     (0x7A57, "design 0x7a57"),
@@ -189,3 +188,8 @@ def test_negative_twin_an_unknown_design_still_has_no_debug_port():
 
     with pytest.raises(NothingOnTargetError):
         design_debug(0x000D)
+
+
+def test_multicore_has_a_dap_on_the_host_path():
+    recipe = mps3ocd.design_debug(0x0003)
+    assert recipe.configs == ("nanosoc_mps3_multicore_jtag.cfg",)
