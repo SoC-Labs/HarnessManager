@@ -45,7 +45,6 @@ from pathlib import Path
 
 ENV_APP_BROWSER = "HARNESS_MANAGER_APP_BROWSER"
 ENV_KEEP_DBUS = "HARNESS_MANAGER_APP_KEEP_DBUS"
-ENV_ICON = "HARNESS_MANAGER_ICON"
 TITLE = "Harness Manager"
 #: The taskbar identity. scripts/install.ps1 stamps the same string on the Start menu shortcut.
 APP_USER_MODEL_ID = "uk.ac.soton.soclabs.harness-manager"
@@ -155,15 +154,12 @@ def set_app_user_model_id(platform: str | None = None, shell32: object | None = 
 
 
 def find_icon(platform: str | None = None) -> Path | None:
-    """The window icon: ``$HARNESS_MANAGER_ICON``, else the one the installer put in the
-    install root, else the checkout's built icons. ``.ico`` on Windows, ``.png`` elsewhere."""
+    """The window icon: the one the installer put in the install root, else the checkout's
+    built icons. ``.ico`` on Windows, ``.png`` elsewhere."""
     plat = platform or sys.platform
     ext = ".ico" if plat == "win32" else ".png"
     names = [f"harness-manager{ext}"]
     roots: list[Path] = []
-    named = os.environ.get(ENV_ICON, "").strip()
-    if named:
-        return Path(named) if Path(named).is_file() else None
     home = os.environ.get("HARNESS_MANAGER_HOME", "").strip()
     if home:
         roots.append(Path(home) / "icon")

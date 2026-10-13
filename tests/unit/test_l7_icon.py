@@ -145,14 +145,7 @@ def test_the_id_matches_the_installers_and_the_desktop_class():
     assert f"StartupWMClass={window.WM_CLASS}" in desktop
 
 
-def test_find_icon_prefers_the_named_file_and_is_per_platform(tmp_path: Path, monkeypatch):
-    icon = tmp_path / "x.png"
-    icon.write_bytes(b"x")
-    monkeypatch.setenv(window.ENV_ICON, str(icon))
-    assert window.find_icon("linux") == icon
-    monkeypatch.setenv(window.ENV_ICON, str(tmp_path / "missing.png"))
-    assert window.find_icon("linux") is None
-    monkeypatch.delenv(window.ENV_ICON)
+def test_find_icon_prefers_the_installed_file_and_is_per_platform(tmp_path: Path, monkeypatch):
     home = tmp_path / "root"
     (home / "icon").mkdir(parents=True)
     (home / "icon" / "harness-manager.ico").write_bytes(b"i")
@@ -160,6 +153,8 @@ def test_find_icon_prefers_the_named_file_and_is_per_platform(tmp_path: Path, mo
     assert window.find_icon("win32") == home / "icon" / "harness-manager.ico"
     # no installed PNG: the checkout's built one
     assert window.find_icon("linux").name == "harness-manager.png"
+    (home / "icon" / "harness-manager.png").write_bytes(b"p")
+    assert window.find_icon("linux") == home / "icon" / "harness-manager.png"
 
 
 def test_start_gets_the_icon_only_when_pywebview_takes_it(tmp_path: Path):
