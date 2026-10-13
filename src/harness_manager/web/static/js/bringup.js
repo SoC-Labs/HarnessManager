@@ -518,7 +518,7 @@ function ReleaseSource({ bid, w }) {
         <b class="mono">${r.version}</b> <span class="small muted">${r.impl || "?"} · ${r.static_id || ""} · ${r.verdict || "no verdict"}</span></label></li>`)}</ul>` : null}
     ${w.planError ? html`<${Reason} level="err" text=${`${w.planError.errName}: ${w.planError.message}`} />` : null}
     ${plan ? html`<div class="bu-plan" data-testid="release-plan">
-      <ul class="small">${(plan.steps || []).map((s, i) => html`<li key=${i}>${s.detail || s.what || s.step || JSON.stringify(s)}</li>`)}</ul>
+      <ul class="small">${(plan.steps || []).map((s, i) => html`<li key=${i}>${s.detail || s.what || s.step || "Another step (no description given)"}</li>`)}</ul>
       ${(plan.blockers || []).map((b) => html`<${Reason} key=${b} level="err" testid="release-blocker" text=${`The planner refuses this release here: ${b}`} />`)}
       ${(plan.blockers || []).length && linux(w) ? html`<${Reason} testid="release-linux-usb"
         text="A Linux release cannot be installed over the Debug USB today: its OS image needs the running harness. Write its configuration SD from its bundle (a folder or zip), then the user microSD with a whole-card image in step 5." />` : null}

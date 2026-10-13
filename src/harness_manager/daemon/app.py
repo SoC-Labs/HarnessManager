@@ -829,10 +829,13 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     async def _guard(request: Request, call_next):
         try:
             response = await call_next(request)
-        except Exception as exc:  # noqa: BLE001 - a bug: say so, with the envelope
+        except Exception:  # noqa: BLE001 - a bug: say so, with the envelope
             log.exception("internal error on %s %s", request.method, request.url.path)
+            # The raw exception stays in the log above; the user gets a sentence and a step.
             response = _JSON(error_body(HarnessError(
-                f"internal error: {type(exc).__name__}: {exc}")), status_code=500)
+                "Something went wrong in the background service.",
+                hint="Details are in Activity; try again, or restart the app.")),
+                status_code=500)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("X-Frame-Options", "DENY")
