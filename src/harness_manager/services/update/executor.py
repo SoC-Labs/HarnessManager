@@ -59,6 +59,7 @@ from harness_manager.core.pack import TAKES_DETAIL, BackupRecord, PreflightItem
 from harness_manager.core.session import pid_alive
 
 from .. import reset_guard
+from ..slots import REBOOT_WAIT_S_LINUX
 from . import s0lb
 from .bundle import OverlayHandler, PreparedRelease, prepare_release
 from .channel import VerifiedChannel
@@ -726,7 +727,7 @@ class HarnessInstaller:
                 raw = self._reboot_when_idle(
                     session, board_id, "reboot:", reset_guard.ACTION_HARNESS_REBOOT,
                     lambda: slots.reboot(progress=self._progress(board_id, "reboot:"),
-                                         wait_s=plan.reboot_wait_s or 180.0))
+                                         wait_s=plan.reboot_wait_s or REBOOT_WAIT_S_LINUX))
                 evidence = _evidence(raw, slots)
         except reset_guard.CardBusyError as exc:
             # SLOT-TIMING: the card job outlasted the wait; nothing was rebooted.

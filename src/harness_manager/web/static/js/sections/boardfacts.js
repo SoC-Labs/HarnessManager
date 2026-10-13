@@ -173,3 +173,21 @@ export function factChips(facts) {
     title: f.user_sd ? "The Linux harness sees a card in the user microSD slot." : "The Linux harness sees no card in the user microSD slot." });
   return out;
 }
+
+// The card's layout, from the board's `usd` reply (net-protocol v0.20 slot_mb / store_ver; both absent on an
+// older shell, which means 8 MiB slots). "" when there is no card read yet.
+export function cardLayoutText(card) {
+  if (!card || !card.store || !card.present) return "";
+  const ver = Number.isInteger(card.store_ver) ? card.store_ver : null;
+  const mb = Number.isInteger(card.slot_mb) ? card.slot_mb : (ver === 2 ? 32 : 8);
+  return `layout ${ver === null ? "v1" : `v${ver}`} · ${mb} MiB design slots`;
+}
+
+// The same as one chip for the board facts: a v1 card cannot keep the big designs (the 7 MB multicore needs 8 MiB; more needs v2).
+export function cardLayoutChip(card) {
+  const text = cardLayoutText(card);
+  if (!text) return null;
+  const v2 = Number.isInteger(card.store_ver) ? card.store_ver >= 2 : (Number.isInteger(card.slot_mb) && card.slot_mb > 8);
+  return { key: "layout", level: v2 ? "ok" : "warn", text,
+    title: v2 ? "This card has 32 MiB design slots." : "This card's design slots are 8 MiB. Re-make the card in layout v2 (32 MiB slots) to keep larger designs on it." };
+}

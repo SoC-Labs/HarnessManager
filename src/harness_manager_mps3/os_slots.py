@@ -119,7 +119,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.pack import Progress, SlotInfo, SlotJob, SlotStatus, report_progress
 
 from . import ctlgate, slot_words
-from .constants import IMPL_LINUX, PUSH_PORT
+from .constants import IMPL_LINUX, PUSH_PORT, REBOOT_WAIT_S_LINUX
 
 log = logging.getLogger(__name__)
 
@@ -908,7 +908,7 @@ class Mps3OsSlots:
 
     # -- reboot ---------------------------------------------------------------------------------
 
-    def reboot(self, progress: Progress | None = None, wait_s: float = 180.0) -> dict | None:
+    def reboot(self, progress: Progress | None = None, wait_s: float = REBOOT_WAIT_S_LINUX) -> dict | None:
         """The ``reboot`` verb, witnessed: the harness's ``up_ms`` (from ``stats``) must
         restart after the request, i.e. be shorter than the time since it was sent."""
         from harness_manager.services import reset_guard

@@ -485,6 +485,19 @@ class Mps3Deploy:
 
         return self._shell.call_raw(ask)
 
+    def _check_slot_fits(self, size_bytes: int) -> None:
+        """Keep on the card: refuse, before a byte is pushed, a design bigger than the card's
+        design slot. A card that cannot be read here is left to the keep's own refusals."""
+        from .card import slot_capacity_refusal
+
+        try:
+            st = self.card_status()
+        except Exception:                      # noqa: BLE001 - the keep's own checks speak
+            return
+        why = slot_capacity_refusal(st.slot_mb, size_bytes)
+        if why:
+            raise RefusedError(why, hint="deploy without keeping it on the card, or re-make the card")
+
     def commit_pusher(self, *, windowed: bool, impl: str,
                       on_frame: Callable[[BitstreamKind, int], None] | None = None,
                       stall_s: float | None = None, host: str | None = None,
@@ -523,6 +536,8 @@ class Mps3Deploy:
         ov = assessment.entry.overlay
         clearing_len = ov.manifest.clearing.len
         total = clearing_len + ov.manifest.partial.len
+        if keep_on_card:
+            self._check_slot_fits(total)
         sent = {BitstreamKind.CLEARING: 0, BitstreamKind.PARTIAL: 0}
 
         def on_frame(kind: BitstreamKind, payload_bytes: int) -> None:
@@ -791,13 +806,19 @@ def card_status_from(st: Any) -> CardStatus:
     return CardStatus(store=True, present=True, state=state, text=text, reason=why, **more)
 
 
+def _opt_int(v: Any) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
 def _card_facts(st: Any) -> dict[str, Any]:
     """The rest of the ``usd`` reply (LINUX-SLOTS ``card status``): the capacity, the
     power-on default, the power-on decision, whether a commit could land."""
     d = getattr(st, "default", None)
     default = ({"rm_id": str(d.rm_id), "static_id": str(d.static_id), "slot": str(d.slot)}
                if d is not None else None)
-    return {"card_mb": getattr(st, "card_mb", None), "default": default,
+    return {"card_mb": getattr(st, "card_mb", None),
+            "slot_mb": _opt_int(getattr(st, "slot_mb", None)),
+            "store_ver": _opt_int(getattr(st, "store_ver", None)), "default": default,
             "boot": str(getattr(st, "boot", "") or ""),
             "committable": bool(getattr(st, "committable", False))}
 

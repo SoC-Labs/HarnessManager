@@ -13,7 +13,7 @@ import { html, useEffect } from "../lib.js";
 import { boardState, changed, jobLabel, loadCard, openActivity, scheduleRefresh } from "../store.js";
 import { ArmBox, Card, Chip, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
 import {
-  identityOf, isLinux, loadSlots, mccRoute, osKind, slotsOf, USB_WORDS,
+  cardLayoutText, identityOf, isLinux, loadSlots, mccRoute, osKind, slotsOf, USB_WORDS,
 } from "./boardfacts.js";
 import {
   HarnessRollbackFoot, HarnessRollbackPanels, NOT_YET, offeredText, ReleasesCard,
@@ -179,7 +179,7 @@ function CardHere({ bid }) {
   const running = (v[run] || {}).version || identityOf(b).harness_version || "?";
   return html`<${Card} title="User microSD (the OS slots)" icon="memory-stick" cls="os-here" testid="os-here"
       sub="Two OS slots: one runs, the other is the fallback.">
-    <div class="os-card-line">${card.card_mb ? `${(card.card_mb / 1024).toFixed(0)} GB card · ` : ""}slots A and B · the overlay store${b.slotsLoading ? html` · <${Spinner} /> reading` : ""}</div>
+    <div class="os-card-line">${card.card_mb ? `${(card.card_mb / 1024).toFixed(0)} GB card · ` : ""}slots A and B · the overlay store${cardLayoutText(card) ? ` · ${cardLayoutText(card)}` : ""}${b.slotsLoading ? html` · <${Spinner} /> reading` : ""}</div>
     ${b.slotsError ? html`<${Reason} level="err" text=${`${b.slotsError.errName}: ${b.slotsError.message}`} />` : null}
     <div class="os-slots"><${SlotTile} id="A" os=${os} /><${SlotTile} id="B" os=${os} /></div>
     ${fell ? html`<div class="outcome warn os-fell" data-testid="slot-fell-back"><${Icon} name="triangle-alert" />
@@ -286,7 +286,8 @@ export function versionsStatus(bid) {
     return [os.job.text || `${os.job.state} slot ${os.job.slot}`, "accent", "The user microSD is busy"];
   }
   if (os && os.fell_back) return [`slot ${os.fell_back} did not boot`, "warn", `Slot ${os.fell_back} failed to boot; ${os.running} runs as the fallback`];
-  const empty = os && ["A", "B"].find((x) => !((os.slots || {})[x] || {}).version);
+  // The slot tile's own rule (:46): a slot is empty by its STATE; a valid image may carry no version record.
+  const empty = os && ["A", "B"].find((x) => { const sl = (os.slots || {})[x] || {}; return !sl.state || sl.state === "empty"; });
   if (empty) return [`slot ${empty} is empty`, "warn", `Slot ${empty} holds no image`];
   if (!b.info) return ["not read yet", null, "The board has not been read yet"];
   const ver = identityOf(b).harness_version || "?";

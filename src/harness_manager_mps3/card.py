@@ -252,6 +252,9 @@ class Mps3Card:
         entry = self._entry(live.rm_id, live.shell_id)
         name = entry.ref.name
         total = entry.overlay.manifest.clearing.len + entry.overlay.manifest.partial.len
+        too_big = slot_capacity_refusal(st.slot_mb, total)
+        if too_big:
+            raise RefusedError(too_big, hint="the card keeps the design it had; nothing was sent")
         sent: dict[Any, int] = {}
 
         def on_frame(kind: Any, n: int) -> None:
@@ -338,6 +341,26 @@ def commit_budget(nbytes: int) -> Any:
     return replace(t, job_s=max(COMMIT_TIMEOUT_S, budget_s(nbytes)), setting_s=COMMIT_TIMEOUT_S)
 
 
+#: A design slot on a layout-v1 card (and on a shell that does not say): 8 MiB.
+DEFAULT_SLOT_MIB = 8
+SLOT_TOO_SMALL = ("This card's design slots are 8 MiB. Re-make the card in layout v2 "
+                  "(32 MiB slots) to keep this design on it.")
+
+
+def slot_capacity_refusal(slot_mb: int | None, size_bytes: int | None) -> str:
+    """Why a design of ``size_bytes`` cannot be kept in a design slot of ``slot_mb`` MiB
+    ("" when it fits, or when its size is not known). ``slot_mb`` None (an older shell, or the
+    store header not read) means 8 MiB."""
+    if not size_bytes:
+        return ""
+    mib = slot_mb if isinstance(slot_mb, int) and slot_mb > 0 else DEFAULT_SLOT_MIB
+    if size_bytes <= mib * 1024 * 1024:
+        return ""
+    if mib > DEFAULT_SLOT_MIB:
+        return f"This design is bigger than this card's design slots ({mib} MiB)."
+    return SLOT_TOO_SMALL
+
+
 def _usd_error(what: str, err: str) -> HarnessError:
     """A ``usd``/``commit`` refusal (contract error NAMES) -> the error class it means."""
     e = (err or "").strip()
@@ -370,6 +393,10 @@ def _usd_error(what: str, err: str) -> HarnessError:
         return lock
     if e == "unavailable":
         return UnavailableError(CAPABILITY, "the harness's card store is unavailable")
+    if e == "bad args" and "commit" in what:
+        # The engine's answer to a design bigger than the card's slot (nothing else in a
+        # commit's arguments can be wrong: HM builds them).
+        return RefusedError(SLOT_TOO_SMALL, hint="the card keeps the design it had")
     return ActionFailedError(f"{what} failed: {e or 'no reason given'}",
                              hint="the card keeps its previous default")
 
