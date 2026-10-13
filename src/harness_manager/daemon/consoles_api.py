@@ -223,6 +223,23 @@ def register(ctx: RouteContext) -> None:
             result = setter(session, name, baud)
         return _JSON(ok(board_id=bid, **result))
 
+    # -- hostio (HM 1.2 L4: the mint-4 hostio bridge, feature ``hostio``) ----------------------
+
+    @api.get("/boards/{bid:path}/hostio")
+    def hostio_get(bid: str) -> JSONResponse:
+        session = ctx.board(bid)
+        with d.gates.op(bid):
+            return _JSON(ok(board_id=bid, **broker_call("hostio")(session)))
+
+    @api.post("/boards/{bid:path}/hostio")
+    def hostio_set(bid: str, body: JsonBody = None) -> JSONResponse:
+        session = ctx.board(bid)
+        mode = _obj(body).get("mode")
+        if mode not in ("console", "hostio4"):
+            raise UsageError("mode must be console or hostio4")
+        with d.gates.op(bid):
+            return _JSON(ok(board_id=bid, **broker_call("hostio_set")(session, mode)))
+
     # -- the richer console list --------------------------------------------------------------------
 
     @api.get("/boards/{bid:path}/consoles")

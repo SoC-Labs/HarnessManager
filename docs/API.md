@@ -137,6 +137,8 @@ The routes come from extension modules: `harness_manager.daemon.<consoles_api|hu
 | `DELETE /boards/{bid}/consoles/{name}/pty` | `{ok}`. Also closed when the board closes. |
 | `GET /boards/{bid}/consoles/{name}/baud` | `{baud, settable, reason?, choices: [int], source}`. `source` is `serial` (the rate the host port is set to), `design` (the loaded design's fixed rate, e.g. 76800 for nanosoc), `harness` (the harness reports it) or `unknown`. `settable: false` carries `reason`. |
 | `POST /boards/{bid}/consoles/{name}/baud` `{baud}` | `{baud, source}`. A serial console reopens at the new rate. An Ethernet console needs the harness feature `uart_baud`; without it, 422 UNAVAILABLE with the reason. |
+| `GET /boards/{bid}/hostio` | `{mode, pending, changing, held, drops, note}`: the hostio bridge (feature `hostio`); `pending` differs from `mode` until the next design load |
+| `POST /boards/{bid}/hostio` `{mode: "console"\|"hostio4"}` | the new state; claim-locked; refused in words unless the greybox is loaded or the DUT is held (the change applies at the next design load) |
 | `GET /boards/{bid}/consoles` | Also returns `consoles: [{name, kind: "ethernet"|"serial", baud, settable, pty: path or null}]` next to `names`. |
 
 Events: `console.state` gains `{baud}` when the rate changes, and `console.pty {name, path, clients}` fires when screen attaches or detaches.

@@ -50,6 +50,8 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("DELETE", "/boards/{bid}/consoles/{name}/pty"),
         ("GET", "/boards/{bid}/consoles/{name}/baud"),
         ("POST", "/boards/{bid}/consoles/{name}/baud"),
+        ("GET", "/boards/{bid}/hostio"),                   # HM 1.2 L4
+        ("POST", "/boards/{bid}/hostio"),
     ),
     "hub_api": (
         ("GET", "/boards/{bid}/tunnel"),

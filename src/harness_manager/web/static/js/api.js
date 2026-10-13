@@ -196,6 +196,8 @@ export const ENDPOINTS = Object.freeze({
   cosimAct: ["POST", "/boards/{bid}/cosim"],
   sensors: ["GET", "/boards/{bid}/sensors"],                     // HM 1.2: the SYSMON sensors
   sensorsAct: ["POST", "/boards/{bid}/sensors"],
+  hostioGet: ["GET", "/boards/{bid}/hostio"],                    // HM 1.2: the hostio bridge
+  hostioSet: ["POST", "/boards/{bid}/hostio"],
   // --- end v1.1 ---
 });
 

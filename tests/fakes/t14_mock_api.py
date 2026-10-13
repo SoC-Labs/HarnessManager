@@ -1122,6 +1122,18 @@ def hm12_register(app: FastAPI, state: Any) -> None:
         state.session(bid)
         return _ok(board_id=bid, offered=False, reason="This board's image has no clock control")
 
+    @app.get(f"{API}/boards/{{bid}}/hostio")
+    def hostio_get(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, mode="console", pending="console", changing=False, held=False,
+                   drops={"ch0": 0, "ch1": 0}, note="")
+
+    @app.post(f"{API}/boards/{{bid}}/hostio")
+    def hostio_set(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, mode="console", pending="console", changing=False, held=False,
+                   drops={"ch0": 0, "ch1": 0}, note="the demo boards have no hostio bridge")
+
     @app.get(f"{API}/boards/{{bid}}/sensors")
     def sensors(bid: str) -> dict[str, Any]:
         state.session(bid)
