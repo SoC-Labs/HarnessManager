@@ -315,7 +315,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
           ${ipNow && !errors.ip ? html`<div class="nb-ip" data-testid="nb-ip">
             <span class="nb-ip-label">${p && p.address.moving ? "After the restart the board answers at" : "The board's IP"}</span>
             <span class="nb-ip-value mono" data-testid="nb-ip-value">${ipNow}</span>
-            <span class="small" data-testid="nb-ip-note">${p.address.same_net.charAt(0).toUpperCase()}${p.address.same_net.slice(1)}.</span>
+            ${p.address.same_net ? html`<span class="small" data-testid="nb-ip-note">${p.address.same_net.charAt(0).toUpperCase()}${p.address.same_net.slice(1)}.</span>` : null}
           </div>` : null}
           ${sub && sub.warning ? html`<div class="stack gap-8" data-testid="nb-pool-subnet">
             <${Reason} level="warn" text=${sub.warning} />
@@ -352,7 +352,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
         ${done.address && done.address.ip ? html`<div class="nb-ip" data-testid="nb-ip">
           <span class="nb-ip-label">The board answers at</span>
           <span class="nb-ip-value mono" data-testid="nb-ip-value">${done.address.ip}</span>
-          <span class="small">${done.address.same_net.charAt(0).toUpperCase()}${done.address.same_net.slice(1)}.</span></div>` : null}
+          ${done.address.same_net ? html`<span class="small">${done.address.same_net.charAt(0).toUpperCase()}${done.address.same_net.slice(1)}.</span>` : null}</div>` : null}
         ${done.moved ? html`<div class="stack gap-8" data-testid="nb-moved">
           <${Reason} text=${`The board moved: it was found at ${done.moved.host} by its SSH host key, and its claim and settings now belong to ${done.moved.to}.`} />
           <div><button type="button" class="btn primary sm" data-action="nb-open-moved"

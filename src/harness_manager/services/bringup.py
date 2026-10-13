@@ -971,13 +971,14 @@ def identity_inputs(engine: Any) -> tuple[Any, dict[str, list[str]], dict[str, l
 
 def propose_identity(serial: str, *, policy: Any = None, taken_macs: Any = (),
                      taken_ips: Any = (), urandom: Callable[[int], bytes] | None = None,
-                     ) -> dict[str, Any]:
+                     hub: bool = False) -> dict[str, Any]:
     """What the wizard and the CLI propose for a new board (editable; nothing is set, written
     or reserved here): ``{serial, label, hostname, mac, mac_how, ip, ip_how, ip_error,
     same_net, notes}``. The name is ``MPS3-`` and the serial's last 4 letters or digits
     (upper case: the panel takes A-Z, 0-9 and -); the MAC is random (byte 0 the pack's,
     never a reserved range or a MAC in the registry); the IP is the first free address of the
-    pack's pool (``ip_error`` says why there is none)."""
+    pack's pool (``ip_error`` says why there is none). ``hub``: the board is reached through
+    a hub, so this PC's network is beside the point and ``same_net`` is empty."""
     from harness_manager.core.errors import HarnessError
     from harness_manager.services import identity_assign as IA
 
@@ -998,7 +999,7 @@ def propose_identity(serial: str, *, policy: Any = None, taken_macs: Any = (),
         ip_error = exc.message + (f" ({exc.hint})" if exc.hint else "")
     return {"serial": serial.strip(), "label": label, "hostname": label.lower(), "mac": mac,
             "mac_how": IA.MAC_RANDOM, "ip": ip, "ip_how": IA.IP_AUTO if ip else "",
-            "ip_error": ip_error, "same_net": IA.same_net_note(ip), "pool": policy.ip_pool,
+            "ip_error": ip_error, "same_net": IA.same_net_note(ip, hub=hub), "pool": policy.ip_pool,
             "ip_note": IP_NOTE, "notes": notes}
 
 
