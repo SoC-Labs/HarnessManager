@@ -316,9 +316,12 @@ KEY_TYPES_ALLOWED = ("ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha
                      "sk-ecdsa-sha2-nistp256@openssh.com")
 KEY_LABEL_MAX = 64
 KEY_LINE_MAX = 8 * 1024
-#: Where the board keeps the keys: the claim file, and the copy the SSH server reads.
+#: The claim file (IMAGE_CONTRACT 4.2): HM edits ONLY this, atomically (tmp + sync + rename,
+#: 0600, at most 16 KiB), then runs the image's sync, which rebuilds the file the SSH server
+#: reads (/root/.ssh/authorized_keys = the image's baked keys + the claim's lines). HM never
+#: writes that derived file: a baked key is the image's, not the claim's.
 KEYS_FILE = "/persist/ssh/authorized_keys"
-KEYS_FILE_LIVE = "/root/.ssh/authorized_keys"
+KEYS_SYNC = "/usr/sbin/mps3-keys-sync"
 _PRIVATE_MARKERS = ("PRIVATE KEY", "-----BEGIN", "PuTTY-User-Key-File", "openssh-key-v1")
 PRIVATE_KEY_WORDS = ("that looks like a PRIVATE key. Never paste a private key anywhere: "
                      "nothing was sent or kept. Paste the PUBLIC key instead (the .pub file, "
@@ -389,29 +392,38 @@ def parse_key_listing(text: str) -> list[dict[str, str]]:
 _AWK_HAS = "awk -v b=\"$BLOB\" '{for(i=1;i<=NF;i++) if($i==b) f=1} END{exit !f}'"
 _AWK_DROP = "awk -v b=\"$BLOB\" '{for(i=1;i<=NF;i++) if($i==b) next; print}'"
 
-#: The board-side scripts (POSIX sh, busybox). The first line names the operation.
+#: The board-side scripts (POSIX sh, busybox). The first line names the operation. Output words:
+#: nofile / there / toolarge / last / added / removed, then synced or nosync.
 KEYS_LIST_SCRIPT = f"# hm-keys list\ncat {KEYS_FILE}"
+_KEYS_COMMIT = (
+    "[ \"$(wc -c < \"$t\")\" -le 16384 ] || { rm -f \"$t\"; echo toolarge; exit 6; }\n"
+    "chmod 600 \"$t\" && sync && mv \"$t\" \"$f\" || { rm -f \"$t\"; exit 5; }\n")
+_KEYS_SYNC = f"{KEYS_SYNC} >/dev/null 2>&1 && echo synced || echo nosync\n"
 KEYS_ADD_SCRIPT = (
     "# hm-keys add\n"
-    f"[ -f {KEYS_FILE} ] || {{ echo nofile; exit 3; }}\n"
-    "add() {\n"
-    "  f=\"$1\"; mkdir -p \"$(dirname \"$f\")\"; touch \"$f\"\n"
-    f"  if {_AWK_HAS} \"$f\"; then echo \"there $f\"; return 0; fi\n"
-    "  [ -s \"$f\" ] && [ -n \"$(tail -c1 \"$f\")\" ] && echo >> \"$f\"\n"
-    "  printf '%s\\n' \"$LINE\" >> \"$f\"; echo \"added $f\"\n"
-    "}\n"
-    f"add {KEYS_FILE}\nadd {KEYS_FILE_LIVE}\n")
+    f"f={KEYS_FILE}; t=\"$f.hm-new\"\n"
+    "[ -f \"$f\" ] || { echo nofile; exit 3; }\n"
+    f"if {_AWK_HAS} \"$f\"; then echo \"there $f\"; exit 0; fi\n"
+    "{ cat \"$f\"; [ -s \"$f\" ] && [ -n \"$(tail -c1 \"$f\")\" ] && echo; "
+    "printf '%s\\n' \"$LINE\"; } > \"$t\" || { rm -f \"$t\"; exit 5; }\n"
+    + _KEYS_COMMIT + "echo \"added $f\"\n" + _KEYS_SYNC)
 KEYS_REMOVE_SCRIPT = (
     "# hm-keys remove\n"
-    f"f={KEYS_FILE}; g={KEYS_FILE_LIVE}\n"
+    f"f={KEYS_FILE}; t=\"$f.hm-new\"\n"
     "[ -f \"$f\" ] || { echo nofile; exit 3; }\n"
-    f"left=$({_AWK_DROP} \"$f\" | awk '$1 ~ /^(ssh|ecdsa|sk)-/' | wc -l)\n"
-    "[ \"$left\" -ge 1 ] || { echo last; exit 4; }\n"
-    "for t in \"$f\" \"$g\"; do\n"
-    "  [ -f \"$t\" ] || continue\n"
-    f"  {_AWK_DROP} \"$t\" > \"$t.hm-new\" && cat \"$t.hm-new\" > \"$t\"; rm -f \"$t.hm-new\"\n"
-    "  echo \"removed $t\"\n"
-    "done\n")
+    f"{_AWK_DROP} \"$f\" > \"$t\" || {{ rm -f \"$t\"; exit 5; }}\n"
+    "left=$(awk '$1 ~ /^(ssh|ecdsa|sk)-/' \"$t\" | wc -l)\n"
+    "[ \"$left\" -ge 1 ] || { rm -f \"$t\"; echo last; exit 4; }\n"
+    + _KEYS_COMMIT + "echo \"removed $f\"\n" + _KEYS_SYNC)
+
+
+def _sync_note(out: str, changed: bool) -> dict[str, Any]:
+    """Did the board's key sync run? Without it the change takes effect at the next boot (the
+    image runs the sync on every boot)."""
+    if not changed or "nosync" not in out:
+        return {}
+    return {"note": "the board saved the change but could not apply it now; it takes effect "
+                    "at the board's next boot"}
 
 
 # --- where things live ---------------------------------------------------------------------------
@@ -1660,6 +1672,9 @@ class Mps3Claim:
         if "nofile" in out:
             raise RefusedError("the board has no claim key file, so there is nothing to add to",
                                hint="is the board claimed? `board claim-status TARGET`")
+        if "toolarge" in out:
+            raise RefusedError("the board's key file would pass its 16 KiB limit; nothing was "
+                               "changed", hint="remove a key you no longer need first")
         if res.returncode != 0:
             raise ActionFailedError("the board did not accept the key; check its log",
                                     hint=_stderr_line(res.stderr))
@@ -1669,7 +1684,7 @@ class Mps3Claim:
             raise ActionFailedError("the key was sent but the board does not list it; nothing "
                                     "more was changed", hint="run `board keys list TARGET`")
         return {"action": "added" if added else "already_there", "fingerprint": k["fingerprint"],
-                "label": k["label"], "keys": keys}
+                "label": k["label"], "keys": keys, **_sync_note(out, added)}
 
     def remove_key(self, fp: str, *,
                    progress: Callable[[str], None] | None = None) -> dict[str, Any]:
@@ -1706,7 +1721,8 @@ class Mps3Claim:
         if fp in {x["fingerprint"] for x in left}:
             raise ActionFailedError("the board still lists the key after removing it",
                                     hint="run `board keys list TARGET`")
-        return {"action": "removed", "fingerprint": fp, "keys": left}
+        return {"action": "removed", "fingerprint": fp, "keys": left,
+                **_sync_note(res.stdout, True)}
 
     def _capture_host_key(self, expected_fp: str, *, fresh: bool, identity_file: str) -> str:
         """Connect once with ``accept-new`` into a scratch known_hosts and return the key line
