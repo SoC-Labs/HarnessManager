@@ -4,7 +4,7 @@ cards in this PC's card reader").
 | Route | Does |
 |---|---|
 | ``GET /cardwriter/devices`` | ``{enabled, reason?, supported, platform, simulated, cap_bytes?, devices, excluded}`` |
-| ``POST /cardwriter/check`` ``{kind, source}`` | ``{kind, source, unsigned: {phrase, sha256, of, files, how, banner, path}, card? or files and count}``: what a write would write, and the unsigned phrase it needs |
+| ``POST /cardwriter/check`` ``{kind, source}`` | ``{kind, source, unsigned: {phrase, sha256, of, files, how, banner, path}, card? (adds ``layout`` v1/v2/unknown, ``slot_a``/``slot_b``/``persist``/``store`` ``{start, sectors, mib}``, ``slot_mib``) or files and count}``: what a write would write, and the unsigned phrase it needs |
 | ``POST /cardwriter/write`` ``{device_id, kind, source, confirm, confirm_unsigned, backup_path?, backup_dir?, allow_mcc_update?}`` | 202 job ``cardwriter_write`` |
 
 The service is ``services.cardwriter`` (the CLI's ``flash`` verb runs the same code

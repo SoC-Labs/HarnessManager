@@ -15,8 +15,10 @@ two things onto the card in one of them:
   below).
 - ``card``: a WHOLE-CARD image onto the whole device (the Linux harness's user microSD), as
   ``stage0_mkcard.py card --card-img`` builds it (STAGE0_CONTRACT.md §6: the MBR at LBA 0,
-  the boot-select sectors at LBA 1-2, slot A at LBA 67584 and B at 198656, /persist p3, the
-  D13 store p4). Checked first, the way stage0 reads a card (``services.update.s0lb`` for
+  the boot-select sectors at LBA 1-2, then the partitions: MBR entry 1 = slot A, 2 = slot B,
+  3 = /persist, 4 = the D13 store (type 0xDA). Where they sit depends on the layout, v1 or v2
+  (``services.card_layout``); nothing here fixes a sector, the card's own table decides).
+  Checked first, the way stage0 reads a card (``services.update.s0lb`` for
   the slots): the MBR signature 0x55AA at bytes 510-511, then entries 1/2 (type 0x7F) and at
   least one slot whose S0LB boot table passes every CRC; never larger than the device.
   ``linux_slot.img`` (S0LB at byte 0) is ONE OS slot and is refused with how to build a card
@@ -111,6 +113,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.pack import BackupRecord, Progress
 
+from . import card_layout as _layout
 from . import unsigned as _unsigned
 from .update import s0lb
 
@@ -849,7 +852,6 @@ def _refuse_run(argv: Sequence[str]) -> tuple[int, bytes, bytes]:
 
 BLOCK = 512
 TYPE_SLOT = 0x7F                 # MBR entries 1 and 2: stage0's slots A and B
-LBA_A, LBA_B = 67584, 198656     # where stage0_mkcard puts them (stage0 reads the entries)
 MIB = 1 << 20
 SLOT_IMAGE_REFUSAL = ("that is a single OS slot (linux_slot.img), not a whole-card image: "
                       "build one with stage0_mkcard.py card --card-img")
@@ -886,10 +888,16 @@ class CardImage:
     slots: tuple[str, ...]           # the bootable ones: "A", "B"
     hdr_crc: str                     # the first bootable slot's (the board's ``hdr_crc``)
     notes: tuple[str, ...] = ()      # a slot that is not bootable, and why
+    layout: _layout.CardLayout | None = None   # the partitions its MBR names
 
     def describe(self) -> str:
+        lay = f", {self.layout.name} layout" if self.layout is not None else ""
         return (f"a stage0 card image: slot{'s' if len(self.slots) > 1 else ''} "
-                f"{' and '.join(self.slots)} bootable (hdr_crc {self.hdr_crc})")
+                f"{' and '.join(self.slots)} bootable (hdr_crc {self.hdr_crc}{lay})")
+
+    def layout_json(self) -> dict[str, Any]:
+        """The detected layout and slot sizes for the API (additive)."""
+        return self.layout.as_dict() if self.layout is not None else {}
 
 
 def inspect_card(path: Path | str) -> CardImage:
@@ -911,6 +919,12 @@ def inspect_card(path: Path | str) -> CardImage:
             raise RefusedError(f"{path.name} is not a whole-card image: no MBR (0x55AA at bytes "
                                f"510-511)",
                                hint="build one with stage0_mkcard.py card --card-img")
+        try:
+            lay = _layout.parse_mbr(head, require_slots=False)
+        except _layout.CardLayoutError as exc:
+            raise RefusedError(f"{path.name}: {exc}",
+                               hint="nothing was written; make the card image with the card "
+                                    "tool first") from exc
         good: list[str] = []
         crc = ""
         notes: list[str] = []
@@ -932,9 +946,10 @@ def inspect_card(path: Path | str) -> CardImage:
     if not good:
         raise RefusedError(f"{path.name} has an MBR but no bootable stage0 slot "
                            f"({'; '.join(notes)})",
-                           hint="the board would sit in rescue; build the card image with "
-                                "stage0_mkcard.py card --card-img")
-    return CardImage(str(path), size, tuple(good), crc, tuple(notes))
+                           hint="This card has no harness partitions. Make it with the card tool first "
+                                "(stage0_mkcard.py card --card-img); the board would sit in "
+                                "rescue")
+    return CardImage(str(path), size, tuple(good), crc, tuple(notes), lay)
 
 
 def file_sha256(path: Path, limit: int | None = None) -> str:
@@ -1181,7 +1196,7 @@ class WritePlan:
         if self.card is not None:
             out["card"] = {"bytes": self.card.size, "slots": list(self.card.slots),
                            "hdr_crc": self.card.hdr_crc, "describe": self.card.describe(),
-                           "notes": list(self.card.notes)}
+                           "notes": list(self.card.notes), **self.card.layout_json()}
         if self.files:
             out["files"] = sorted(self.files)
         if self.mbbios:
@@ -1382,7 +1397,8 @@ class CardWriter:
         if kind == "card":
             image = inspect_card(src)
             out["card"] = {"bytes": image.size, "slots": list(image.slots),
-                           "describe": image.describe(), "notes": list(image.notes)}
+                           "describe": image.describe(), "notes": list(image.notes),
+                           **image.layout_json()}
         else:
             files = self._bundle(src)
             out["files"] = sorted(files)
