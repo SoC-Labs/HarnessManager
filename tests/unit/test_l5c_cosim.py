@@ -44,11 +44,6 @@ def session_for(vb: VirtualMps3, claim=None) -> SimpleNamespace:
 @pytest.fixture
 def mint4(tmp_path: Path):
     with VirtualMps3(tmp_path, LINUX_MINT4) as vb:
-        # Gap in tests/fakes (W0-A): the harness fake filters the feature names it hands
-        # pyverify, so FakeShell builds no cosim model although version reports "cosim".
-        # Build the reference model here until the fake does.
-        if vb.shell.cosim is None:
-            vb.shell.cosim = CosimModel(vb.shell, None)
         yield vb
 
 
