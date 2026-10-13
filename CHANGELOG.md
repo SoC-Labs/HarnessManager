@@ -4,6 +4,84 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
+## 1.2.0 (unreleased)
+
+Support for boards that run a mint-4 release (v2.2 and later), and a round of fixes and plainer
+words from workshop preparation. Features marked "mint-4" appear only on those boards; other
+boards behave as before.
+
+### Mint-4 boards
+- **The card's layout is read from the card, not assumed.** The card writer reads the card's
+  partition table (layout v1 or v2) before it writes, so a layout-v2 card (32 MiB design
+  slots) no longer has slot A written over its store. The Board > Versions page and the
+  Overview show the card's layout and slot size.
+- **A design too big for the card is refused in words.** On a card with 8 MiB slots, keeping a
+  larger design on the card now says "This card's design slots are 8 MiB. Re-make the card in
+  layout v2 (32 MiB slots) to keep this design on it." (it used to answer "bad args").
+- **Back up and restore the card contents.** Making the card again wipes the board's
+  `/persist` (the keys that claimed it, its name, its sensor calibration, what you kept on the
+  card). Board > Versions has a **Card contents** card: **Back up to this PC**, then
+  **Restore** after the re-make; the card warns when no backup newer than 7 days exists.
+  Command line: `card backup`, `card backups`, `card restore`. The board must be claimed by
+  this PC.
+- **hostio1 console.** TCP 6931 is the DUT's hostio channel on these boards: it is named
+  `hostio1` and its input is not paced. A strip over the console shows the mode of the DUT's
+  console pins and has an armed **Switch to hostio4** / **Switch back to console**, which takes
+  effect at the next design load. The hostio ADP channel (6933) is reachable only through the
+  board's SSH claim and is never forwarded from a hub.
+- **Sensors in Readings.** Die temperature (lowest and highest since power-up), supply rails
+  and alarms in words, with armed **Set alarm thresholds / calibration** and **Clear alarms**.
+- **Power-cycle and warm reset without a USB cable.** Board > Recover offers **Power-cycle the
+  board (through its MCC)** and **Warm reset (like pressing the board's reset button)**, both
+  armed, both confirmed only when the board returns running the same design (2 to 3 minutes).
+- **DUT clock: halt, step, run.** A **DUT clock** card in the Workbench rail and the new
+  `cosim cycles|halt|step N|run` command. Serial input and the network receive are not held
+  while the clock is stopped.
+
+### Access
+- **Adopt this board** in Board > Access, for a board claimed by a key this Harness Manager has
+  no record of (the command line already had `board claim --adopt`).
+- **Board keys.** Board > Access lists who can log in to a claimed board by fingerprint and
+  label, adds a colleague's public key (after showing its fingerprint) and removes a key.
+  A private key is refused. Command line: `board keys list|add|remove`.
+
+### Versions
+- **Each OS slot shows its own release.** Slots A and B are matched to a release by content
+  (never by a version number alone); an image from another tool reads "unknown release".
+
+### Fixes
+- Background errors read in plain words, not as raw exception text or JSON.
+- Claim and lease times show in your local time, not UTC.
+- Hub boards no longer say "this PC must be on the same /24".
+- A board is no longer reported as clashing with its own hub entry.
+- The last step of the rescue-mode wizard is titled "power-cycle it, then name it".
+- A hub board is named by its hub target, not by the target's long description.
+- Roll back waits 300 s for a Linux board (it waited 180 s, and a cold boot takes about 190 s,
+  so it reported a failure that was not one).
+- The multicore design can be debugged from this PC (it was refused although its
+  configuration ships).
+
+### Look and words
+- **Harness Manager has its own icon** and shows as its own app on the Linux, macOS and
+  Windows taskbars: a desktop entry on Linux, `~/Applications/Harness Manager.app` on macOS,
+  the Start menu shortcut on Windows.
+- **One vocabulary.** The board's software is a **release**; the lease buttons are **Take
+  lease**, **Give back lease** and **Force give back**; the baseline button is **Restore
+  baseline**; the board in recovery is in **rescue mode**; the design with nothing in it is the
+  **empty design**.
+- Technical identifiers (shell, protocol, build id, features) moved under **Technical
+  details** on the About page. The background service is called that, not by its program name.
+- 27 developer-only settings are hidden until you tick **Show developer settings**. They keep
+  their values.
+
+### Known limits
+- **Config SD through a hub is not possible:** the hub cannot read the board's card. To change
+  a hub board's release use Board > Versions; to work on the config SD, plug the Debug USB into
+  this PC. The SD card window now says this in plain words instead of failing.
+- `cosim` from the command line while the background service runs is not supported yet.
+- The choice between booting from the network and from the card waits for a command in the
+  board's software; Harness Manager does not offer it yet.
+
 ## 1.1.0 (2026-10-13)
 
 ### Upgrading from 1.0.x

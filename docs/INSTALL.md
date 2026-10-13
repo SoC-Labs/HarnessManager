@@ -70,7 +70,8 @@ steps:
 5. Install the vendored pyverify wheel by its path, then Harness Manager with its
    dependencies (`--find-links vendor`), at the versions pinned in `constraints.txt`.
 6. Write the `harness-manager` command, and check that it runs.
-7. On Linux, add Harness Manager to the desktop's application menu.
+7. On Linux, add Harness Manager to the desktop's application menu; on macOS, make
+   `~/Applications/Harness Manager.app`. Both carry the app icon.
 8. Remember the extras and the menu choice in `install.conf`, so a re-run keeps them.
 9. Put uv in the venv, because the app's self-update builds each new version with it.
    Without network (a wheelhouse with no uv wheel) it says so and carries on.
@@ -85,7 +86,7 @@ It builds from a temporary copy of the checkout, so your checkout gets no `build
 | Venv | `~/.local/share/harness-manager/venv` | `%LOCALAPPDATA%\harness-manager\venv` |
 | Command | `~/.local/bin/harness-manager` | `%LOCALAPPDATA%\harness-manager\bin\harness-manager.exe` |
 | PATH | if the directory is not on it, appends ONE marked block (`# >>> harness-manager PATH ... >>>`) to your shell's startup files ([which files](#when-harness-manager-is-not-on-path)), never twice, and prints what it did; `--no-path` skips it. fish, tcsh and csh get the line to add instead | adds the directory to your user PATH |
-| Menu entry (Linux) | `~/.local/share/applications/harness-manager.desktop`, icon in `~/.local/share/icons/hicolor/scalable/apps/` | none yet |
+| Launcher with the app icon | Linux: `~/.local/share/applications/harness-manager.desktop`, icons under `~/.local/share/icons/hicolor/`. macOS: `~/Applications/Harness Manager.app` | the Start menu shortcut `Harness Manager.lnk` |
 | Choices a re-run keeps | `~/.local/share/harness-manager/install.conf` | the extras, in `install.json` |
 | Install record, self-update pointer | `~/.local/share/harness-manager/install.json`, `current.json` | `%LOCALAPPDATA%\harness-manager\install.json`, `current.json` |
 | Self-updated versions (removed by `--uninstall`) | `~/.local/share/harness-manager/versions/` | `%LOCALAPPDATA%\harness-manager\versions\` |
@@ -112,7 +113,7 @@ says how.
 | `--no-uv` | `-NoUv` | use venv and pip even when uv is on PATH |
 | `--offline DIR` | `-Offline DIR` | install only from a wheelhouse DIR; never contact the package index |
 | `--latest` | `-Latest` | the newest dependency versions instead of the pins (rebuilds the venv) |
-| `--no-desktop` / `--desktop` | `-NoStartMenu` | skip the Linux menu entry (remembered), or bring it back; on Windows, leave out (or remove) the Start menu entry |
+| `--no-desktop` / `--desktop` | `-NoStartMenu` | skip the Linux menu entry or the macOS app (remembered), or bring it back; on Windows, leave out (or remove) the Start menu entry |
 | `--no-path` / `--path` | | do not edit your shell startup files (remembered), or do it again |
 | `--force` | `-Force` | replace a `harness-manager` command the installer did not write |
 | `--uninstall` | `-Uninstall` | stop the service, remove the venv, the self-updated versions, the command and the menu entry |
@@ -147,8 +148,9 @@ app groups under the menu icon in the dock or taskbar.
   says so when it finds none.
 - The entry runs `harness-manager app`: Harness Manager is then in the application menu
   (and in the search of GNOME, KDE and the like) with no terminal.
-- **macOS:** there is no `.app` bundle. Run `harness-manager app`, right-click its Dock
-  icon, Options, Keep in Dock (the installer prints this).
+- **macOS:** the installer makes `~/Applications/Harness Manager.app` (no root), with the app
+  icon. Open it from Finder or Spotlight, then right-click its Dock icon, Options, Keep in
+  Dock. The window shows as its own app, not as a browser or Python window.
 - `--no-desktop` skips it (and removes one an earlier run wrote); later runs remember
   that. `--desktop` brings it back. `--uninstall` removes it. An entry the installer did
   not write is never replaced or removed.
@@ -158,7 +160,8 @@ app groups under the menu icon in the dock or taskbar.
 On Windows the installer adds **Harness Manager** to your Start menu
 (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Harness Manager.lnk`, this user only, no
 Administrator). It runs `harness-manager app`; its console starts minimised and the app opens
-its own window. `-NoStartMenu` leaves it out (and removes one an earlier run added);
+its own window. The shortcut and the running window share one taskbar button with the
+Harness Manager icon. `-NoStartMenu` leaves it out (and removes one an earlier run added);
 `-Uninstall` removes it.
 
 ## Windows

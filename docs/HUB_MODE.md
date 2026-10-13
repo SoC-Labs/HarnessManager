@@ -79,7 +79,7 @@ harness-manager hub remove NAME [--force]
    - ask the hub admin to run `fpgahub token create <name> --role write --owner <you>`;
    - or sign in to the hub's web UI and mint your own with `POST /api/v1/tokens/self`.
 
-   A `read` token can see the lease but cannot take it. Force-release needs an `admin` token (see [Limits](#limits)).
+   A `read` token can see the lease but cannot take it. Force give back needs an `admin` token (see [Limits](#limits)).
 2. **Get the hub's CA certificate** from the hub admin. The web listener's certificate is `/etc/fpgahub/tls/cert.pem`, signed by `/etc/fpgahub/tls/ca.pem`. Save the CA file as `~/lab-hub-ca.pem`.
 3. **Store the token.** Choose one:
    - Write it to a file only you can read:
@@ -136,7 +136,7 @@ puts a target in a board by an explicit `chassis` in its config, else by strippi
 `_ps`, `_pl` or `_mcc` suffix (`grouping.chassis_of`). On the lab hub, board `mps3_01` has
 one target, `mps3_01_pl`.
 
-**HM shows the board.** The lease badge, the header's lease chip, the Release and Close
+**HM shows the board.** The lease badge, the header's lease chip, the Give back and Close
 dialogs, lease messages and the CLI name `mps3_01`. The target appears as a detail:
 `mps3-01 (mps3_01 on HUB, target mps3_01_pl)`. JSON adds `board` beside `target`
 (`GET /boards/{bid}/lease` and its `lease`, the acquire and request results, `released`,
@@ -187,7 +187,7 @@ a second target.
 | Holder name | fpgahub ignores `--holder` | the same: `Lease.holder` is the principal, e.g. `alice@mapstone-dev` |
 | Waiting in the queue | re-run `lease acquire` every 20 s | the hub's own long poll, `GET /lease/wait`, in 5 s slices (a cancel takes effect within a slice); the queue place is re-asserted every 20 s |
 | Leaving the queue | `fpgahub lease cancel` | `DELETE /targets/{t}/queue`; on a multi-target board it follows fpgahub's 409 `board_required` to `DELETE /boards/{b}/queue` |
-| Force-release | always allowed (the socket is admin) | **admin tokens only**; a write token gets REFUSED and `can_revoke()` says so in advance |
+| Force give back | always allowed (the socket is admin) | **admin tokens only**; a write token gets REFUSED and `can_revoke()` says so in advance |
 | Request notes (message, "keep for N min") | files in `/tmp/harness-manager-lease/` on the hub | **degraded mode**: no messages (see below) |
 | Lease changes | polled every 10 s | pushed by the hub, arriving in well under a second (`hub.event`) |
 | Who force-released me, and why | see the gap below | from the event stream |
@@ -212,7 +212,7 @@ REST has no file store, so a request is **its queue entry alone**:
 |---|---|
 | `put_request` | Keeps the note locally; the message never reaches the holder. |
 | `list_requests` | Returns your own notes, plus every other waiter as a request with an empty message. The id is `q-<holder>`. `created_at` is the hub's `lease.queued` time when the stream saw it, otherwise when this client first saw the waiter. `deadline_at` is 120 s later. |
-| `put_answer` | Raises `UnavailableError`: a "keep" answer cannot reach the requester. "Release" still works, because it is a lease release. |
+| `put_answer` | Raises `UnavailableError`: a "keep" answer cannot reach the requester. "Give back" still works, because it releases the lease. |
 | `get_answer` | Always None. |
 
 `client.notes_supported` is False and `client.notes_reason` gives the reason, so the UI can hide the message field and the Keep buttons.
@@ -313,7 +313,7 @@ So every MCC operation of a hub board runs ON the hub, through the hub's SSH run
 
 | Operation | What runs on the hub |
 |---|---|
-| `mcc TARGET reboot`, **Power > Board reboot** | pyverify's paced REBOOT writer (`bootrate.HUB_MCC_REBOOT_PY`): refuses a second reader and a missing `Cmd>`, types REBOOT at 100 ms a character, captures the boot log (the result names the `.bit` the MCC loaded) |
+| `mcc TARGET reboot`, **Board > Recover** | pyverify's paced REBOOT writer (`bootrate.HUB_MCC_REBOOT_PY`): refuses a second reader and a missing `Cmd>`, types REBOOT at 100 ms a character, captures the boot log (the result names the `.bit` the MCC loaded) |
 | the REBOOT after a hub SD write (`harness install --door hub`) | pyverify's `sd field --already-written`: the journal witness of that sha, the one-reader scan, then the same paced REBOOT |
 | `mcc TARGET temp` / `osc`, `mcc TARGET cmd "CFG R …"` | Harness Manager's hub-side reader: the same one-reader rule and `Cmd>` check; reads only (no `CFG W`, no `DEBUG`/`EXIT` left open) |
 
@@ -393,7 +393,7 @@ fpgahub sends nothing while idle, so the stream has no read timeout; TCP keep-al
 
 ## Limits
 
-- **Force-release needs an admin token.** A write token cannot force; the UI should grey the button out with `can_revoke()`'s reason. The hub feature proposed above would lift this.
+- **Force give back needs an admin token.** A write token cannot force; the UI should grey the button out with `can_revoke()`'s reason. The hub feature proposed above would lift this.
 - **No request messages or "keep" answers over REST.** This is the degraded mode above.
 - **History has no `by`/`reason` without the event stream.** It needs the stream to have been open at the time of the revoke.
 - **The data plane still needs SSH on the lab hub today.** See the options above.

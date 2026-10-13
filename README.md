@@ -39,8 +39,9 @@ git clone git@github.com:SoC-Labs/HarnessManager.git; powershell -ExecutionPolic
 ```
 
 The installer makes a private venv, installs Harness Manager into it at tested
-dependency versions, puts the `harness-manager` command on your PATH, and on Linux adds
-**Harness Manager** to your desktop's application menu. It takes about 20 seconds.
+dependency versions, puts the `harness-manager` command on your PATH, and gives it its own
+launcher and icon: the application menu on Linux, `~/Applications/Harness Manager.app` on
+macOS, the Start menu on Windows. It takes about 20 seconds.
 Nothing needs root or Administrator.
 
 | Option (`install.sh` / `install.ps1`) | What it adds |
@@ -49,7 +50,7 @@ Nothing needs root or Administrator.
 | `--with-app` / `-WithApp` | pywebview, for a native app window on Windows and macOS. Linux uses a Chrome or Chromium app window. |
 | `--from PATH-or-URL` / `-From` | install from another checkout, a wheel, or a git URL |
 | `--offline DIR` | install with no network, from a wheelhouse ([docs/INSTALL.md](docs/INSTALL.md#no-network-a-wheelhouse)) |
-| `--no-desktop` | no application menu entry (Linux) |
+| `--no-desktop` / `-NoStartMenu` | no launcher: no application menu entry (Linux), no app bundle (macOS), no Start menu entry (Windows) |
 
 To upgrade, `git pull`, then run the installer again. It keeps your settings, and
 `install.sh` also keeps the options you chose. To remove Harness Manager, run it with
@@ -97,7 +98,7 @@ harness-manager hub targets lab --add mps3_01_pl    # writes the board into boar
 ```
 
 A hub board is shared, so take its lease before you change anything on it:
-`harness-manager lease acquire 192.168.10.101`, or **Acquire lease** in the app. Harness
+`harness-manager lease acquire 192.168.10.101`, or **Take lease** in the app. Harness
 Manager never takes a lease for you. Once it is yours, the service renews it while the
 board is open, and the app shows the holder and when it ends.
 
