@@ -50,8 +50,11 @@ from .fake_identify import FakeIdentifyResponder
 #: The feature names the installed FakeShell accepts (it refuses any other).
 #: Engine names (lcd_mirror ... and the mint-4 hostio/cosim/sysmon/mccif/mcc_local) are
 #: accepted too: FakeShell builds their models (HostioModel, ...) from them.
-_UPSTREAM_FEATURES = frozenset(getattr(_upstream_fakeshell, "VERSION_FEATURES", ())) | frozenset(
-    getattr(_upstream_fakeshell, "ENGINE_FEATURES", ()))
+#: Only the mint-4 names are added: the other engine names (lcd_mirror, touch, ...) keep this
+#: fake's own models, which the pre-mint-4 panel and display tests were written against.
+MINT4_ENGINE_FEATURES = frozenset({"hostio", "cosim", "sysmon", "mccif", "mcc_local"})
+_UPSTREAM_FEATURES = frozenset(getattr(_upstream_fakeshell, "VERSION_FEATURES", ())) | (
+    MINT4_ENGINE_FEATURES & frozenset(getattr(_upstream_fakeshell, "ENGINE_FEATURES", ())))
 
 #: The FakeShell keywords the upstream Linux profile adds (pyverify HOST lane).
 _UPSTREAM_KEYS = frozenset({"profile", "hung", "mode", "identify", "identify_port", "unit",
@@ -289,8 +292,8 @@ class HarnessFakeShell(FakeShell):
         return reply
 
     def _op_stats(self, request: dict[str, Any]) -> dict[str, Any]:
-        if self.upstream:
-            # Upstream's reply carries the engine blocks (lcd_mirror, sysmon, ...) in contract order.
+        if self.upstream and MINT4_ENGINE_FEATURES & set(self.features or ()):
+            # A mint-4 board: upstream's reply carries stats.sysmon in contract order.
             reply = super()._op_stats(request)
             reply.update(self.stats_extra)
             return reply
