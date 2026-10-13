@@ -1,0 +1,4 @@
+#!/bin/sh
+# Harness Manager.app: start the installed `harness-manager app` (written by scripts/install.sh).
+# exec keeps this process, so the Dock shows this bundle's icon and name.
+exec "@HM@" app "$@"

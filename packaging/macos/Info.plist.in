@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Harness Manager</string>
+    <key>CFBundleDisplayName</key>
+    <string>Harness Manager</string>
+    <key>CFBundleIdentifier</key>
+    <string>uk.ac.soton.soclabs.harness-manager</string>
+    <key>CFBundleExecutable</key>
+    <string>harness-manager-app</string>
+    <key>CFBundleIconFile</key>
+    <string>harness-manager</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@VERSION@</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.13</string>
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>

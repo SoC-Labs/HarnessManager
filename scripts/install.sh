@@ -26,7 +26,8 @@
 #                   scripts/make_wheelhouse.sh; never contact the package index.
 #   --latest        the newest dependency versions, not the tested ones pinned
 #                   in constraints.txt (it rebuilds the venv).
-#   --no-desktop    do not add Harness Manager to the application menu (Linux).
+#   --no-desktop    do not add Harness Manager to the application menu (Linux) or the
+#                   app bundle in ~/Applications (macOS).
 #   --desktop       add it again after an earlier --no-desktop.
 #   --no-path       do not edit your shell startup files when the command's directory
 #                   is not on PATH (the default adds ONE marked block to them).
@@ -74,6 +75,10 @@ legacy_app="$state_dir/update/app"
 apps_dir="$data_home/applications"
 desktop_file="$apps_dir/harness-manager.desktop"
 icon_file="$data_home/icons/hicolor/scalable/apps/harness-manager.svg"
+icon_png_dir="$data_home/icons/hicolor"
+icon_sizes="16 24 32 48 64 128 256 512"
+# macOS: the app bundle in the user's Applications folder (no root).
+mac_app="${HARNESS_MANAGER_MAC_APP:-$HOME/Applications/Harness Manager.app}"
 os="$(uname -s)"
 
 src="" ref="" python="" use_uv=1 force=0 uninstall=0 offline="" latest=0 desktop="" editpath=""
@@ -222,6 +227,15 @@ remove_desktop_entry() {
         rm -f "$desktop_file"
         say "removed  $desktop_file"
         if [[ -f "$icon_file" ]]; then rm -f "$icon_file"; fi
+        local n
+        for n in $icon_sizes; do rm -f "$icon_png_dir/${n}x${n}/apps/harness-manager.png"; done
+        rm -rf "$home_dir/icon"
+    fi
+}
+
+remove_mac_app() {
+    if [[ "$os" == Darwin && -d "$mac_app" ]]; then
+        "$checkout/packaging/macos/make_app.sh" --remove "$mac_app" 2>/dev/null || true
     fi
 }
 
@@ -292,6 +306,7 @@ if [[ $uninstall -eq 1 ]]; then
         else note "left $launcher alone: this script did not write it"; fi
     fi
     remove_desktop_entry
+    remove_mac_app
     remove_path_blocks
     if [[ -d "$venv" ]]; then rm -rf "$venv"; say "removed  $venv"; fi
     # The self-updated versions are venvs, not settings: they go too, from the install
@@ -660,6 +675,9 @@ say "command  $launcher"
 desktop_entry() {
     local template="$checkout/packaging/linux/harness-manager.desktop"
     local icon="$checkout/packaging/linux/harness-manager.svg"
+    # The chosen app icon (packaging/icon/build) wins over the generic one.
+    local built="$checkout/packaging/icon/build"
+    if [[ -f "$built/harness-manager.svg" ]]; then icon="$built/harness-manager.svg"; fi
     case "$launcher$icon_file" in
         *[\"\`\$\\%]*|*$'\n'*)
             note "no menu entry: the command's path has characters a .desktop file cannot quote"
@@ -678,6 +696,21 @@ desktop_entry() {
         return 0
     fi
     cp "$icon" "$icon_file"
+    local n
+    for n in $icon_sizes; do
+        if [[ -f "$built/hicolor/${n}x${n}/apps/harness-manager.png" ]] \
+            && mkdir -p "$icon_png_dir/${n}x${n}/apps" 2>/dev/null; then
+            cp "$built/hicolor/${n}x${n}/apps/harness-manager.png" \
+                "$icon_png_dir/${n}x${n}/apps/harness-manager.png"
+        fi
+    done
+    # The window finds its icon here (web/window.py), for pywebview's start(icon=...).
+    if [[ -f "$built/hicolor/256x256/apps/harness-manager.png" ]] && mkdir -p "$home_dir/icon" 2>/dev/null; then
+        cp "$built/hicolor/256x256/apps/harness-manager.png" "$home_dir/icon/harness-manager.png"
+    fi
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -q -t -f "$icon_png_dir" 2>/dev/null || true
+    fi
     local text
     text="$(cat "$template")"
     text="${text//@LAUNCHER@/"$launcher"}"
@@ -688,6 +721,28 @@ desktop_entry() {
 }
 if [[ "$os" == Linux ]]; then
     if [[ "$desktop" == 1 ]]; then desktop_entry; else remove_desktop_entry; fi
+fi
+
+# -- the macOS app bundle -------------------------------------------------------------------
+# ~/Applications/Harness Manager.app runs `harness-manager app`, so Spotlight, the Dock and
+# Launchpad show the app (not Python's rocket). Re-running rebuilds it; --uninstall removes it.
+mac_app_entry() {
+    local maker="$checkout/packaging/macos/make_app.sh"
+    local icns="$checkout/packaging/icon/build/harness-manager.icns"
+    if [[ ! -x "$maker" || ! -f "$icns" ]]; then
+        note "no app bundle: $checkout/packaging/macos or its icon is missing"
+        return 0
+    fi
+    local ver
+    ver="$("$venv/bin/python" -c 'import harness_manager as h; print(h.__version__)' 2>/dev/null || true)"
+    if ! mkdir -p "$(dirname "$mac_app")" 2>/dev/null; then
+        note "no app bundle: cannot write to $(dirname "$mac_app")"
+        return 0
+    fi
+    "$maker" "$mac_app" "$launcher" "$icns" ${ver:+"$ver"} || note "no app bundle was made"
+}
+if [[ "$os" == Darwin ]]; then
+    if [[ "$desktop" == 1 ]]; then mac_app_entry; else remove_mac_app; fi
 fi
 
 # -- what next ---------------------------------------------------------------------------
@@ -782,7 +837,10 @@ fi
 say "  $hm info 192.168.10.101    a real board on your network"
 if [[ "$os" == Darwin ]]; then
     say ""
-    say "Dock: run \`$hm app\`, right-click the app's Dock icon, Options, Keep in Dock."
-    say "(There is no .app bundle.)"
+    if [[ -d "$mac_app" ]]; then
+        say "Dock: open \"$mac_app\" (also in Spotlight), right-click its Dock icon, Options, Keep in Dock."
+    else
+        say "Dock: run \`$hm app\`, right-click the app's Dock icon, Options, Keep in Dock."
+    fi
 fi
 say "Guide: $checkout/docs/USER_GUIDE.md"
