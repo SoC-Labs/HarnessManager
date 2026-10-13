@@ -77,9 +77,19 @@ Check it: `harness-manager version` prints `0.1.0`.
 **Linux only:** to use the Debug USB, your user needs the serial ports:
 `sudo usermod -aG dialout $USER`, then log out and back in.
 
-**Start it without a terminal:** on Linux the installer adds Harness Manager to the
-application menu (it runs `harness-manager app`). On macOS there is no `.app`: run
-`harness-manager app`, right-click its Dock icon, Options, Keep in Dock.
+**Start it without a terminal, and see it as its own app.** The installer gives Harness
+Manager its own icon and a launcher, so its window shows as "Harness Manager" on the taskbar
+or Dock, not as a browser or Python window:
+
+| System | The launcher | To keep it handy |
+|---|---|---|
+| Linux | a desktop entry in the application menu (it runs `harness-manager app`) | right-click its icon and pin it to the dock or panel |
+| macOS | `~/Applications/Harness Manager.app` | open it, then right-click its Dock icon, Options, Keep in Dock |
+| Windows | the Start Menu shortcut **Harness Manager** | right-click it, Pin to taskbar |
+
+Open the app from that launcher (not from a terminal) so the taskbar groups the window
+under the icon. `--no-desktop` (`-NoStartMenu` on Windows) leaves the launcher out; the
+command `harness-manager app` still works, but its window may show a generic icon.
 
 **Upgrade:** `git pull`, then run the installer again. It keeps your settings and options.
 Once signed releases exist, the app can also update itself ([section 10](#10-updates-the-harness-and-the-app)).
@@ -120,13 +130,15 @@ the application menu has **Harness Manager** and **Open with Demo Boards**.
   [The sidebar](#the-sidebar-order-favourites-and-your-boardstoml-boards) below has the details.
 - **The header** shows the selected board: shell, design, harness, build check, health,
   and for a hub board the tunnel and the lease. **Harness** says which version it shows:
-  **release 1.1.0** (the signed catalogue's release the board runs, once **Update > Harness
-  versions** has read its list), with **firmware 1.0.0** beside it when the firmware's own
-  number differs; before that list is read, **firmware 1.0.0** (what the harness firmware
-  reports). The circular arrow reads the board again: its info, the **Card** line and the SD
-  journal (an interrupted SD install).
-- **The sections:** Overview, XDC, Build, Program, Consoles, Debug, Power, Clocks, SD card,
-  Update, Checks, Activity. In a narrow window the tabs wrap onto a second row.
+  **release 1.1.0** (the signed catalogue's release the board runs, once **Board >
+  Versions** has read its list), with **reports 1.0.0** beside it when the release's own
+  version number differs; before that list is read, the number the release reports. The
+  circular arrow reads the board again: its info, the **Card** line and the SD journal (an
+  interrupted SD install).
+- **The tabs:** Overview, Workbench, Build, Board and (for hub boards) Checks. **Board** has
+  six pages: Recover (resets and power), Versions (releases, card slots, card contents),
+  Connections, Readings (clocks, sensors), Access (claim, keys) and About. In a narrow window
+  the tabs wrap onto a second row.
 - **Overview** has four tiles: Design, Consoles, Debug and Board. A "Needs attention" strip
   appears only when something is wrong. **Details** (folded) holds identity, health counters,
   telemetry, capabilities and the front panel.
@@ -181,7 +193,7 @@ harness-manager info 192.168.10.101
 control    idle
 can        clock_dut, console_dut, debug_dut, deploy_partial, health, identify, reset_dut
 cannot     console_controller: needs the Debug USB cable
-cannot     reboot_board: needs the Debug USB cable, a networked power plug, or harness firmware with 'mccif' or 'mcc_local' (net-protocol v0.18)
+cannot     reboot_board: needs the Debug USB cable, a networked power plug, or a release with 'mccif' or 'mcc_local' (net-protocol v0.18)
 cannot     power_cycle: needs a networked power plug in boards.toml (Shelly, Tasmota or NETIO)
 ```
 
@@ -417,7 +429,7 @@ tunnel only. Leases need a hub table in `boards.toml`, which `hub targets --add`
 - It stops at **group**: your account is not in the `fpga` group. Ask the hub admin.
 - A REST token gets 401: the hub did not accept it. The message names where the token came
   from.
-- **With a REST token only**, force-release needs an admin token, and lease requests carry
+- **With a REST token only**, force give back needs an admin token, and lease requests carry
   no message and no "keep for N minutes". The data plane (consoles, programming) still
   needs a route to the board, which the lab hub does not offer today, so an SSH account is
   still needed. [HUB_MODE.md](HUB_MODE.md) explains both.
@@ -451,10 +463,10 @@ explains why.
 
 | The board list says | The header's lease chip | It means | You can |
 |---|---|---|---|
-| **Yours** | lease yours · 27 min | this Harness Manager holds the lease | **Release lease** (asks first). The service renews it while the board is open here |
-| **Free** | no lease | nobody holds it | **Acquire lease** (it may queue; **Cancel** leaves the queue) |
+| **Yours** | lease yours · 27 min | this Harness Manager holds the lease | **Give back lease** (asks first). The service renews it while the board is open here |
+| **Free** | no lease | nobody holds it | **Take lease** (it may queue; **Leave queue** stops waiting) |
 | **Held by alice@lab-pc-07** | leased to alice@lab-pc-07 | someone else holds it | **Request board** |
-| **Held by david@mapstone-dev (another session)** | leased to david@mapstone-dev (another session) | your hub name holds it, but not this Harness Manager: another session, or a script you run (a soak, a runner) | nothing here: use the board there, or release it there |
+| **Held by david@mapstone-dev (another session)** | leased to david@mapstone-dev (another session) | your hub name holds it, but not this Harness Manager: another session, or a script you run (a soak, a runner) | nothing here: use the board there, or give it back there |
 | **Requested · #1** or **Queued** (beside Held by) | requested · position 1 | you are waiting for it | **Leave queue** (the bar above the header) |
 
 "Yours" means this Harness Manager holds the lease's token, not just your name: every lab
@@ -478,23 +490,23 @@ has it open) and **Hub lease**: who held it when this service last read it, with
 ("held by alice@lab-pc-07, as of 10:42:07"). The service reads it again when you open the
 board; a board it has not read since it started says so instead.
 
-![mps3-03 is yours: Release lease in the header and on the Board tile](review/2026-09-28/lease-yours-light.png)
+![mps3-03 is yours: Give back lease in the header and on the Board tile](review/2026-09-28/lease-yours-light.png)
 
-**Release lease** always asks first: "Release mps3_03? Others can take it; background
+**Give back lease** always asks first: "Give back mps3_03? Others can take it; background
 checks pause. The hub leases it as target mps3_03_pl." It names who is next in the queue,
-and says why when a job on the board stops it (releasing mid-deploy hands a half-programmed board to the next person).
-Force-release is separate, red, and only for someone else's lease ([Force-release](#force-release)).
+and says why when a job on the board stops it (giving it back mid-deploy hands a half-programmed board to the next person).
+Force give back is separate, red, and only for someone else's lease ([Force give back](#force-give-back)).
 
 **Closing a board you hold.** **Close board** on a board whose lease this Harness Manager
-holds asks "Also release the lease on mps3_03?":
+holds asks "Also give back the lease on mps3_03?":
 
-- **Release and close:** others can take the board now.
+- **Give back and close:** others can take the board now.
 - **Keep the lease:** it stays yours until it expires, but nothing renews it while the
   board is closed. Open the board again to keep renewing it.
 - **Cancel:** the board stays open.
 
-Any other board (no hub, a free lease, someone else's) closes without asking. If the
-release fails (the hub does not answer), the board stays open and the dialog says why.
+Any other board (no hub, a free lease, someone else's) closes without asking. If giving
+it back fails (the hub does not answer), the board stays open and the dialog says why.
 Over the API, `DELETE /boards/{bid}?release=true` does both.
 
 ![Close board asks whether to release the lease too](review/2026-09-28/lease-close-confirm-light.png)
@@ -512,7 +524,7 @@ it is leased as: `mps3-01 (mps3_01 on mapstone-dev, target mps3_01_pl): held by 
 | `lease request TARGET --message M` | ask the holder to give it up; waits, with a 2:00 countdown |
 | `lease requests TARGET` | the requests waiting for your answer |
 | `lease respond TARGET ID --release` or `--keep MINUTES` | answer a request (keep: 5, 15, 30 or 60) |
-| `lease force TARGET` | force-release it after the 2:00 ran out (asks first) |
+| `lease force TARGET` | force give it back after the 2:00 ran out (asks first) |
 | `lease leave TARGET` | leave the queue and withdraw your request |
 | `lease dismiss TARGET` | clear the "your lease was force-released" notice |
 
@@ -524,18 +536,18 @@ Default lease lengths: 1 hour for `acquire`, 2 hours once a request succeeds. A 
 1. Click **Request board** (or run `harness-manager lease request 192.168.10.101 --message "need it for the 15:00 demo"`).
 2. You join the queue, and the holder's Harness Manager shows your request.
 3. A bar shows your queue position and a 2:00 countdown.
-4. The holder answers **Release now** (the board is yours) or **Keep for N min** (you keep
+4. The holder answers **Give back now** (the board is yours) or **Keep for N min** (you keep
    waiting; force becomes possible when their time runs out).
-5. With no answer in 2:00, and you at the head of the queue, **Force release…** turns red.
+5. With no answer in 2:00, and you at the head of the queue, **Force give back…** turns red.
 
 **Leave queue** (or `lease leave TARGET`, or Ctrl-C on `lease request`) withdraws your
 request at any time.
 
-![Waiting for an answer: position 1, 1:59 left, Leave queue and Force release](review/2026-09-24/lease-request-waiting-light.png)
+![Waiting for an answer: position 1, 1:59 left, Leave queue and Force give back](review/2026-09-24/lease-request-waiting-light.png)
 
-### Force-release
+### Force give back
 
-**Force release…** kicks the holder off the board now: anything they are running stops.
+**Force give back…** kicks the holder off the board now: anything they are running stops.
 It asks first. When no Harness Manager session is known to hold the lease, the holder may
 be a script (a soak or a runner). Then you must also **type the board's name**
 (`mps3-01`) before **Force** is enabled. From a script, `--yes` is not enough there: pass
@@ -546,12 +558,12 @@ harness-manager lease force 192.168.10.101
 harness-manager lease force 192.168.10.101 --yes --confirm-board mps3-01   # no terminal
 ```
 
-![Force release: the confirm names the holder and what stops](review/2026-09-24/lease-force-confirm-light.png)
+![Force give back: the confirm names the holder and what stops](review/2026-09-24/lease-force-confirm-light.png)
 
 ### When you hold it and someone asks
 
 A banner shows on every page: "`<who>` wants mps3-01: *message*", with a countdown,
-**Release now**, and **Keep for 5 / 15 / 30 / 60 min**. If someone at the board taps the
+**Give back now**, and **Keep for 5 / 15 / 30 / 60 min**. If someone at the board taps the
 request on its front panel, the banner says so. A tap never releases the board.
 
 ![The holder's prompt](review/2026-09-24/lease-holder-prompt-light.png)
@@ -560,7 +572,7 @@ request on its front panel, the banner says so. A tap never releases the board.
 
 A red banner says who force-released the board, when and why. Stop driving the board
 until you have the lease again. **Dismiss** (or `lease dismiss TARGET`) clears it; the next
-forced release shows again.
+forced give back shows again.
 
 ![The force-released banner](review/2026-09-24/lease-victim-banner-light.png)
 
@@ -690,6 +702,17 @@ rate, because `screen` alone sets 9600.
 Input to `uart0` and `uart1` is paced at 20 ms a byte, because the nanoSoC UART has no
 receive FIFO. A paste arrives intact, but slowly.
 
+**Boards running a mint-4 release (v2.2 and later): `hostio1`.** On these boards TCP 6931 is
+the DUT's hostio channel, so the console is called **hostio1** (not `uart1`) and its input is
+not paced: the channel has its own flow control. A strip above the console shows the mode of
+the DUT's console pins (**console** or **hostio4**), the bytes dropped because nobody was
+listening, and a note when the DUT is held in reset. To change the mode, tick **Arm**, then
+press **Switch to hostio4** (or **Switch back to console**). It needs the board claimed by
+this PC, and it takes effect at the next design load: load the empty design or hold the DUT
+first, or the board refuses with that advice. The hostio ADP channel (TCP 6933) is not in
+the console list and is never forwarded from a hub: it is reachable only through the board's
+SSH claim.
+
 **Reset the DUT from the console.** In `console TARGET uart0`, press **Ctrl-]** then **r**:
 the console asks `reset the DUT of <board>? r or y resets it`. Press **r** (or **y**) and the
 DUT resets while the console stays open, so you see it boot. Any other key cancels. After
@@ -722,7 +745,7 @@ the console, both terminals share its session and `reset` works.
 4. Click **Program**. **Progress** shows each phase, then "Done. rm_id … is verified by the
    board".
 
-**Restore baseline** loads the safe design (the greybox) and confirms it.
+**Restore baseline** loads the empty design (the safe baseline, the "greybox" file) and confirms it.
 
 On a claimed Linux board, Program and Restore baseline first stop OpenOCD on the board (below).
 When that fails, the outcome says why and **Program anyway** (or **Restore anyway**) appears:
@@ -1024,7 +1047,7 @@ are empty, and `rm_timing_note` says so with the whole design's WNS and WHS from
 
 ## 8. Debug: OpenOCD and XVC
 
-**Needs:** a board with a debug-capable design loaded (nanosoc; the greybox has no debug
+**Needs:** a board with a debug-capable design loaded (nanosoc; the empty design has no debug
 port). Behind a hub, hold the lease (HM refuses XVC without it).
 
 The **Debug** section has two cards: **DUT debug (OpenOCD)** for the DUT CPU, and **Fabric
@@ -1230,7 +1253,7 @@ load the new probes.
 
 ## 9. The front panel
 
-**Needs:** a board. What the card shows depends on what the board's harness image reports:
+**Needs:** a board. What the card shows depends on what the board's release reports:
 the panel's own text needs the harness feature `panel`, who is connected needs `presence`,
 Identify needs `locate`, and the Live display needs the Linux harness with `lcd_mirror`.
 
@@ -1271,7 +1294,7 @@ You do not need to open the board or hold its hub lease. What to expect:
 - **A tap on the panel stops the blink.** The count in the app still runs to its end.
 - **The DUT owns the panel:** only the backlight blinks, with no banner.
 - **Disabled icon:** its tooltip says why, for example "Identify isn't available on this
-  harness image yet (harness feature 'locate')", or "Not read yet" before a scan.
+  release yet (feature 'locate')", or "Not read yet" before a scan.
 - **Never automatic:** Harness Manager sends it only when you click, or when you run
   `identify`.
 
@@ -1302,7 +1325,7 @@ holder; it never releases the board.
 - **"Rebuilt":** the image has no `panel` (bare metal v0.11, and Linux images before the
   panel features). The text is rebuilt from what HM read; `NET` is the board's own address,
   never your SSH tunnel's `127.0.0.1`. Identify is disabled with "Identify isn't available
-  on this harness image yet (harness feature 'locate')".
+  on this release yet (feature 'locate')".
 - **"Live display: checking your lease with the hub...":** the hub did not answer the
   lease read this time (its ssh server turns connections away when it is busy). The display
   asks again by itself and opens when the hub answers; **Details** shows the hub's own
@@ -1322,7 +1345,7 @@ Two things update separately:
 
 | What | Where in the app | Command |
 |---|---|---|
-| the board's harness (config SD, overlays, OS image) | **Update > Harness versions** | `harness-manager harness …` |
+| the board's harness (config SD, overlays, OS image) | **Board > Versions** | `harness-manager harness …` |
 | this app, Harness Manager itself | the banner at the top, and **Settings** | `harness-manager update app …` |
 
 ### 10.1 Harness versions
@@ -1331,7 +1354,7 @@ Two things update separately:
 
 **When:** to move a board to another harness release, pin it, or go back.
 
-**In the app:** **Update > Harness versions** lists every signed release, each with a
+**In the app:** **Board > Versions** lists every signed release, each with a
 verdict for this board:
 
 | Verdict | Means |
@@ -1345,8 +1368,8 @@ verdict for this board:
 asks. **Pin** keeps the board on a release (nothing newer is offered). **History** shows
 the last installs. **Roll back** reinstalls the release the last install replaced.
 
-**Running** is the catalogue's release the board runs; when its firmware reports another
-number (the version verb, what `info` prints), it says "firmware reports 1.0.0" beside it,
+**Running** is the catalogue's release the board runs; when the release reports another
+number (the version verb, what `info` prints), it says "reports 1.0.0" beside it,
 and the header shows both. Behind a hub, installs are for this Harness Manager holding the
 lease: a lease your hub name holds in another session is not enough (the lease line says so,
 and the service refuses the install).
@@ -1384,6 +1407,9 @@ line `--consent "REKEY 0x72BB0A36"`. `--yes` never implies it.
 - **Auto-revert** is on by default: if the board answers neither ping nor version for 60
   seconds after the reboot, HM writes the previous `nanosoc.bit` back and reboots again.
   Untick it (or `--no-auto-revert`) only when you will recover the board yourself.
+- **The configuration SD window cannot act on a hub board.** The hub cannot read the card or
+  write other files to it, so the window says so in a sentence. Use Board > Versions for
+  releases; to back up the SD or write files by hand, plug the board's Debug USB into this PC.
 
 **An OS image** (Linux harness) installs over Ethernet only when it is for the static the
 board runs. Otherwise it needs the Debug USB or the hub.
@@ -1464,6 +1490,12 @@ macOS and `%ProgramData%\harness-manager\policy.toml` on Windows.
 **Which value wins:** the administrator's lock, then an environment variable, then your
 file, then the administrator's default, then the board pack's, then the built-in
 default. `config get` says where each value came from.
+
+**Developer settings.** 27 settings that a workshop user has no reason to change (console
+pacing, the SYSMON backend, the hub's inline connection fields, port bases, the update
+source) are hidden from the Settings page and from `config list`. They keep their values and
+still work. Tick **Show developer settings** (at the bottom of Settings), or add `--all` to
+`config list`, to see them.
 
 **On the command line**
 
@@ -1641,7 +1673,7 @@ the OS slots.
 |---|---|
 | `card status TARGET` | present, the store, the power-on default, the OS slots |
 | `card commit TARGET` | the running overlay becomes the power-on default |
-| `card clear TARGET` | no power-on default: the greybox loads at power-on |
+| `card clear TARGET` | no power-on default: the empty design loads at power-on |
 
 **No card: the board boots exactly as it always has**, and every card change is refused.
 Changes need the lease and a confirm (`--yes` skips it): Harness Manager's rules, not the
@@ -1653,19 +1685,24 @@ running overlay is not in this machine's store: program it from here first.
 A new OS image goes into the slot that is neither running nor the default. It boots only
 after you commit it and reboot, and a rollback puts the other slot back.
 
+**In the app:** **Board > Versions** shows both slots. Each tile names the release the slot
+holds (matched by its content, never by a version number alone); an image written by another
+tool shows as "unknown release", and an unused slot as empty. On a mint-4 card it also shows
+the card's layout and slot size.
+
 1. See the slots: `harness-manager slot status 192.168.10.101`
 2. Push the image: `harness-manager slot push 192.168.10.101 --bundle ~/release/linux_bundle.json`
 3. Commit it: `harness-manager slot commit 192.168.10.101`
-4. Reboot the board: **Power > Board reboot**, or `harness-manager mcc 192.168.10.101 reboot`.
+4. Reboot the board: **Board > Recover**, or `harness-manager mcc 192.168.10.101 reboot`.
    A Linux board gets its own 300 s budget (`--wait` changes it) and takes 3 to 4 minutes to
-   come back (a cold boot answers after ~190 s since stage0's DDR settle). Behind a hub the REBOOT runs on the hub; nothing to start first. The output says
+   come back (a cold boot answers after ~190 s since the board's memory takes that long to settle). Behind a hub the REBOOT runs on the hub; nothing to start first. The output says
    which `.bit` the MCC loaded (`MCC loaded …`).
 5. Check it: `slot status` shows the new slot running and default, and a push now goes to
    the OTHER slot. It says "booted (not yet confirmed)" until the harness reports that
    harnessd confirmed the boot: a boot alone is not a confirm.
 
 If it is wrong: `harness-manager slot rollback 192.168.10.101` makes the other slot the
-default and reboots into it (up to 180 s; `--no-reboot` waits for the next reboot).
+default and reboots into it (up to 300 s; `--no-reboot` waits for the next reboot).
 
 | Command | What it does |
 |---|---|
@@ -1678,8 +1715,8 @@ default and reboots into it (up to 180 s; `--no-reboot` waits for the next reboo
 **What can go wrong**
 - **No free slot:** after a commit and before the reboot, no slot is free. Roll back first,
   or push with `--rollback-first`.
-- **"slot B failed to boot; A is running":** the new image never came up healthy, so stage0
-  went back to the old one, but the default is still B (stage0 tries B again at every power
+- **"slot B failed to boot; A is running":** the new image never came up healthy, so the board
+  went back to the old one, but the default is still B (it tries B again at every power
   cycle). `harness-manager slot rollback TARGET` makes A the default and frees B.
 - **"identity lock (mismatch)" or "(unknown)":** the card's OS image and the FPGA's static
   disagree, or one cannot be read. It is not the SSH claim. Push the image built for this
@@ -1751,10 +1788,101 @@ at …** opens it there. Another board answering at the new address is never ado
 | no free address in the pool | refused: widen `mps3.identity.ip_pool` (`harness-manager config set mps3.identity.ip_pool 192.168.10.110-249`) or give `--ip` |
 | a card written on a PC (its /persist is blank) | refused (no persistent store): `harness-manager board ssh TARGET -c 'mps3-persist format --erase && mps3-reboot'`, claim the board again, then name it. Harness Manager never formats a card by itself |
 | not seen at the new IP after 4 min | it may be on DHCP, or the address was taken (DAD): the panel's row 5 shows its IP |
-| stage0 rescue | in recovery mode still answers on 192.168.10.101 with its default MAC, whatever the board's name |
+| rescue mode | a board in recovery still answers on 192.168.10.101 with its default MAC, whatever the board's name |
 
 Harness Manager keeps every MAC and IP it gave or saw, per board and with the date, in
 `<state dir>/identity/seen.json`; **Random** and **Auto** never hand one of them out again.
+
+### 12.5 Back up the card contents before you re-make the card
+
+**Needs:** the Linux harness, a board running a mint-4 release (v2.2 and later), and the board
+claimed by this PC ([12.1](#121-claim-the-board-once)).
+
+**When:** before you make the card again (for example in layout v2, which has 32 MiB design
+slots). Making the card wipes the board's **card contents**: the keys that claimed it, its
+name and identity, its sensor calibration and what you kept on the card.
+
+**In the app:** **Board > Versions**, the **Card contents** card.
+
+1. Press **Back up to this PC**. Harness Manager copies the card contents over the board's
+   SSH and keeps the copy, with its time, size and file count, in the list under the button.
+2. Make the card.
+3. Pick the backup in the list and press **Restore**, then tick **Arm**. It writes the files
+   back (files with the same names are overwritten) and compares the board's file list with
+   the backup.
+
+The card also says whether a backup newer than 7 days exists, and warns "Back up the card
+contents first" when there is none. That warning is advice: it does not stop you.
+
+| Command | What it does |
+|---|---|
+| `card backup TARGET` | copy the card contents to this PC |
+| `card backups TARGET` | the backups kept for this board |
+| `card restore TARGET [--backup ID] [--yes]` | put a backup back (the newest by default); behind a hub it needs the lease |
+
+The card layout shows beside the card (for example "layout v2 · 32 MiB design slots"). A
+design larger than the card's slots is refused with "This card's design slots are 8 MiB.
+Re-make the card in layout v2 (32 MiB slots) to keep this design on it." The card writer reads
+the card's own partition table, so it works on layout v1 and v2 cards.
+
+### 12.6 Who else may log in: your board's keys
+
+**Needs:** the Linux harness, and the board claimed by this PC.
+
+**When:** a colleague needs root on your board, or someone should no longer have it.
+
+**In the app:** **Board > Access**.
+
+1. Press **Show who can log in**. Each key shows its fingerprint and label; your own key
+   has no Remove button.
+2. To add one, press **Add a key…**, paste their **public** key (one line from a `.pub` file),
+   press **Check the key**, read the fingerprint and label, tick **Arm** and press **Add this
+   key**. A private key is refused and nothing is kept.
+3. To remove one, press **Remove…** beside it, tick **Arm** and press **Remove this key**.
+   That person can no longer log in.
+
+A board that someone claimed with a key this Harness Manager has no record of shows
+**Adopt this board…** in the same place. If that key is on this PC (a claim made from here
+before, or with the platform scripts), arm it and press **Adopt this board**.
+
+| Command | What it does |
+|---|---|
+| `board keys list TARGET` | the keys the board accepts, by fingerprint and label |
+| `board keys add TARGET --key "ssh-ed25519 AAAA…"` or `--key-file FILE.pub` | add a key (`--label` names it) |
+| `board keys remove TARGET --fingerprint SHA256:… [--yes]` | remove one |
+
+### 12.7 Sensors: temperature and supplies
+
+**Needs:** a board running a mint-4 release (v2.2 and later).
+
+**In the app:** **Board > Readings**, the **Sensors** card: the die temperature (with the
+lowest and highest since power-up and whether it is calibrated), the supply rails, and any
+alarms in words. The card has no power sensor to show: there is none on this board. To change
+the alarm levels or the calibration, fill the fields, tick **Arm** and press **Set alarm
+thresholds / calibration**; **Clear alarms** forgets the alarms seen so far. Both need the
+board claimed by this PC. The card is not shown on a board without the sensors.
+
+### 12.8 The DUT clock: halt, step, run
+
+**Needs:** a board running a mint-4 release (v2.2 and later), the board claimed by this PC to
+stop the clock. Reading the cycle count needs no claim.
+
+**When:** you want to look at the DUT between two clock edges, or run it a known number of
+cycles.
+
+**In the app:** **Workbench**, the **DUT clock** card in the rail: the cycle count so far,
+**Halt**, **Step** (type a number of cycles from 1 to 100,000,000) and **Run**.
+
+| Command | What it does |
+|---|---|
+| `cosim cycles TARGET` | the clock's state and cycle count |
+| `cosim halt TARGET` | stop the DUT clock |
+| `cosim step TARGET N` | run exactly N cycles, then stop |
+| `cosim run TARGET` | let the clock run again |
+
+Serial input and the network receive are not held while the clock is stopped, so a stopped or
+stepped run is exact inside the DUT and on its buses, but not on those pins. A design load or a
+DUT or RP reset starts the clock again.
 
 ## 13. Checks: the HIL runbooks, unattended
 
@@ -1770,7 +1898,7 @@ the report lists them. [HIL_AUTO.md](HIL_AUTO.md) has the details and the safety
 1. **Plan:** picked from the board, with the reason under it: bare metal → `bare-metal`; the
    Linux harness with no user microSD → `linux-nocard`; with a blank card → `linux-netboot`;
    with a usable card → `linux`. Choose another to override it.
-2. **Writes:** Read only, or Safe (it also swaps an overlay in and puts greybox back, and
+2. **Writes:** Read only, or Safe (it also swaps an overlay in and puts the empty design back, and
    reads the MCC once per iteration). It never writes a card, a slot or an SD, never reboots,
    never claims, never forces anything.
 3. **Run until** (default the next 08:30) **every** 15 to 60 minutes (default 30); **Start**
@@ -1784,7 +1912,7 @@ the report lists them. [HIL_AUTO.md](HIL_AUTO.md) has the details and the safety
    planned end, what it changes, what it never does). **Copy** it into your message.
 6. **Start.** The panel follows the run: the iteration, the check it is on, the counts, the
    first failure, the next start. You can close the app; the run goes on in the service.
-   **Stop** finishes the check it is on, puts greybox back and writes the report.
+   **Stop** finishes the check it is on, puts the empty design back and writes the report.
 7. **Past runs** lists the runs on this board. Open one for its report, and each iteration's.
 
 While a run is on, the board cannot be closed and `harness-manager daemon stop` refuses; the
@@ -1800,7 +1928,7 @@ the service and follows it; Ctrl-C is Stop. `--in-process` runs it in the termin
 - `refused to start: the hub lease … is held by …`: someone else's lease; the run never forces.
 - `STOPPED for safety` in the report: an unexpected identity, a refusal, another holder, the
   lease lost, or the board unreachable. `REPORT.md` names the check and its hint; the board is
-  put back on greybox when the run swapped it and the lease is still yours.
+  put back on the empty design when the run swapped it and the lease is still yours.
 
 ## 14. Troubleshooting
 
@@ -1814,7 +1942,7 @@ the service and follows it; Ctrl-C is Stop. `--in-process` runs it in the termin
 | `busy` | another program holds the board, or the harness is finishing a failed swap | close the other program, or wait 30 s |
 | `offline` | nothing answers | check power, the cable, and your PC's address |
 | `wedged` | the harness took the connection and never replied | reboot the board (14.2, step 4) |
-| `rescue` | the harness has no bootable image | install the bundle again (14.2, step 6) |
+| `rescue` | the board has no bootable release | install the bundle again (14.2, step 6) |
 
 ### 14.2 The recovery ladder
 
@@ -1826,7 +1954,7 @@ Start at the top. Go down one step only when the step above did not help.
 3. **Reset the DUT:** `harness-manager reset TARGET`.
 4. **Reboot the board from its SD:** `harness-manager mcc - --serial PORT reboot` with the
    Debug USB. Behind a hub: `harness-manager mcc TARGET reboot` (it runs on the hub; never
-   start a share on `tty_00`). On a Linux board, **Power > Restart the shell** first restarts
+   start a share on `tty_00`). On a Linux board, **Board > Recover**, Restart shell, first restarts
    the harness alone, without reloading the FPGA.
 5. **Power-cycle:** the switch, off for ten seconds. With a networked plug:
    `harness-manager power cycle TARGET`.
@@ -1839,6 +1967,15 @@ Start at the top. Go down one step only when the step above did not help.
 
 Harness Manager never writes the MCC's firmware (`.ebf` files) and refuses the MCC commands
 that erase or reformat, so none of these steps changes the board controller.
+
+**With no Debug USB cable (a board running a mint-4 release, v2.2 and later).** Such a board
+can ask its own controller. In **Board > Recover**, **Power-cycle the board (through its MCC)**
+powers it off and on, and the FPGA reloads from the config SD (2 to 3 minutes);
+**Warm reset (like pressing the board's reset button)** restarts the whole board without
+reloading the FPGA (about 3 minutes on a Linux board). Both need the board claimed by this PC,
+and **Arm**. They count as done only when the controller confirms the restart and the board
+comes back running the same design. A board that is wedged cannot ask: use the power switch, or
+press PB0 at the board.
 
 ### 14.3 Exit codes
 
@@ -1864,7 +2001,7 @@ that erase or reformat, so none of these steps changes the board controller.
 |---|---|
 | a greyed-out button | read the reason beside it; `info` lists what each capability needs |
 | "needs the Debug USB cable" | plug it in and use `--serial` and `--volume`, or reopen the board in the app |
-| "needs harness firmware with '…'" | the harness is older than the feature; a newer harness adds it |
+| "needs a release with '…'" | the board's release is older than the feature; a newer release adds it |
 | "harness-manager-daemon is not answering" | `harness-manager daemon status`; `daemon stop`, then any command starts it again |
 | `power show` or `power cycle` says the service does not pass the power meter | close the board in the app, then run it with `HARNESS_MANAGER_NO_DAEMON=1`, or use the app's **Power** section |
 | exit 4 on debug right after another session | wait a few seconds and retry ([section 8.1](#81-the-dut-cpu-openocd-and-gdb)) |
@@ -1974,7 +2111,7 @@ with the two lines above, for your adapter, each with a **Copy** button in the a
 Windows calls the board's network (no gateway: an "Unidentified network") **Public**, and
 Windows Firewall then drops what the board sends unasked: the UDP identify replies. TCP
 still works, so `info` and the consoles work, but finding boards on the network, a board in
-stage0 RESCUE, and a board that moved to its new IP are not seen. Make the network Private
+a board in rescue mode, and a board that moved to its new IP are not seen. Make the network Private
 (Administrator PowerShell, your adapter's name):
 
 ```powershell
