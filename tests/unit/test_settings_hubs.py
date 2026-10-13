@@ -610,3 +610,13 @@ def test_with_the_engine_the_packs_rows_check_a_discovered_boards_keys():
     assert H.load_resolver().schema.find("boards.x.hub.target") is None   # twin: core only
     out = H.add_board_for_target("lab", "mps3_01_pl", r, details=DETAILS)
     assert out["board"] == "mps3_01_pl"
+
+
+def test_l6_a_discovered_hub_board_is_named_by_its_target_not_its_description():
+    settings(LAB)
+    r = H.load_resolver()
+    out = H.add_board_for_target("lab", "mps3_01_pl", r, details=DETAILS)
+    assert out["name"] == "mps3_01_pl"                       # not "HBI0309C MPS3 #01 (lab)"
+    r2 = H.load_resolver()                                   # twin: a name given is kept
+    out = H.add_board_for_target("lab", "mps3_02_pl", r2, details=DETAILS, name="Bench 2")
+    assert out["name"] == "Bench 2"

@@ -297,7 +297,7 @@ def test_rest_target_details_for_add_board(rest):
     got = HT.target_details("remote", "kr260_01_ps", resolver=r)
     assert got["network"]["board_ip"] == "192.168.20.101"
     out = H.add_board_for_target("remote", "kr260_01_ps", r, details=got)
-    assert out["match"] == ["192.168.20.101"] and out["name"] == "KR260 PS"
+    assert out["match"] == ["192.168.20.101"] and out["name"] == "kr260_01_ps"   # L6: the target name, not the description
     assert not hub.leases
 
 

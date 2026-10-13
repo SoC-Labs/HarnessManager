@@ -501,8 +501,9 @@ def add_board_for_target(hub_name: str, target: str, resolver: Resolver, *,
     """Write a ``boards.toml`` entry for ``target`` on the hub (the design's "Add" button):
     ``hub = { use, target }``, ``via = "hub"`` (no MCC share: Harness Manager never holds a
     share on tty_00 and runs the MCC on the hub; MCC-FIX),
-    ``name`` (the hub's description) and ``match`` (the target's ``board_ip``) from
-    ``details`` (``hubtest.target_details``) unless given. Refused when the key exists or
+    ``name`` (the hub target's own name, e.g. ``mps3_01_pl``: the hub's long description
+    is no label) and ``match`` (the target's ``board_ip``, from ``details``,
+    ``hubtest.target_details``) unless given. Refused when the key exists or
     another board already has this hub and target."""
     hub = resolve_hub(hub_name, resolver)
     check_target(target)
@@ -519,7 +520,7 @@ def add_board_for_target(hub_name: str, target: str, resolver: Resolver, *,
     details = dict(details or {})
     net = details.get("network") if isinstance(details.get("network"), Mapping) else {}
     ip = net.get("board_ip") if isinstance(net.get("board_ip"), str) else ""
-    label = name if name is not None else str(details.get("description") or "")
+    label = name if name is not None else target
     addrs = list(match) if match is not None else ([ip] if ip else [])
     changes: dict[str, Any] = {}
     if addrs:
