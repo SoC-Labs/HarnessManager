@@ -61,7 +61,8 @@ def test_a_demo_service_keeps_its_settings_to_itself_and_reaches_no_hub(started)
         assert listing["service"] == {"demo": True}
         assert listing["files"]["config_dir"] == str(sdir)
         keys = {r["key"] for r in listing["rows"]}
-        assert {"mps3.slot.job_timeout_s", "mps3.slot.card_write_bps", "mps3.console.pace_ms"} <= keys
+        assert {"mps3.slot.job_timeout_s", "mps3.slot.card_write_bps"} <= keys
+        assert "mps3.console.pace_ms" not in keys             # L11: pacing is developer-only
         # a change and a secret land in the demo's own dir
         assert c.put("/api/v1/settings", json={"mps3.slot.job_timeout_s": 1200}).status_code == 200
         r = c.put("/api/v1/settings/secrets/updates.github_token", json={"value": "ghp_demo"})

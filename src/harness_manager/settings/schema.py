@@ -16,7 +16,8 @@ exactly as TOML quotes it, so a board key with dots in it stays one part.
 - ``admin``: the user's choice too, but the admin policy may lock it (``[lock]``) or
   pre-set it for the machine (``[default]``).
 - ``dev``: a developer or test seam. Environment only, never in the menu (``ui`` is False);
-  ``config list --all`` shows it.
+  ``config list --all`` shows it. (``dev_only`` is the softer cousin: a row anyone may set,
+  hidden from the menu and ``config list`` until "Show developer settings" / ``--all``.)
 - ``installer`` / ``build``: read-only facts shown for reference.
 
 **Apply** says what a change needs: ``live`` (read at each use), ``reopen`` (the next board
@@ -180,6 +181,7 @@ class Setting:
     readonly: bool = False            # shown, never set here (the doc says where it is set)
     ceiling: bool = False             # an admin value is a ceiling, never a floor (a cap)
     advanced: bool = False            # the menu shows it under "Advanced"
+    dev_only: bool = False            # hidden from the menu unless "Show developer settings"; settable
     pack: str = ""                    # the board pack that declared it ("" = the core)
     check: Callable[[Any], str] | None = field(default=None, compare=False, repr=False)
 
@@ -223,7 +225,7 @@ class Setting:
     @property
     def ui(self) -> bool:
         """Shown in the menu? Developer seams are not (``config list --all`` shows them)."""
-        return self.owner != "dev"
+        return self.owner != "dev" and not self.dev_only
 
     @property
     def collection(self) -> str:
@@ -238,7 +240,8 @@ class Setting:
                 "secret": self.secret, "apply": self.apply, "owner": self.owner,
                 "env": self.env, "env_rank": self.env_rank, "choices": list(self.choices),
                 "readonly": self.readonly, "lockable": self.lockable, "ui": self.ui,
-                "ceiling": self.ceiling, "advanced": self.advanced, "pack": self.pack,
+                "ceiling": self.ceiling, "advanced": self.advanced, "dev_only": self.dev_only,
+                "pack": self.pack,
                 **self.bounds_view()}
 
     def bounds_view(self) -> dict[str, Any]:

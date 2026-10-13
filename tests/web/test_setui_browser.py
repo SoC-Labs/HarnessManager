@@ -463,6 +463,8 @@ def test_a_reopen_class_change_offers_reopen_board_which_closes_and_opens_it(pag
     page = page_factory("light", **APP)
     open_board(page, BOARD_USB)
     page.locator('[data-action="settings"]').click()
+    page.locator('[data-testid="settings-nav"] [data-settings-section="advanced"]').click()
+    page.locator('[data-action="show-dev"]').check()                  # L11: pacing is developer-only
     page.locator('[data-testid="settings-nav"] [data-settings-section="consoles"]').click()
     r = row(page, "mps3.console.pace_ms")
     expect(source(r)).to_have_attribute("data-source", "pack", timeout=T)
@@ -482,7 +484,7 @@ def test_a_reopen_class_change_offers_reopen_board_which_closes_and_opens_it(pag
 
 def test_negative_twin_with_no_board_open_a_reopen_change_offers_no_button(page_factory, world, engine):
     world()
-    page = open_settings(page_factory, "consoles")
+    page = open_settings(page_factory, "consoles", dev=True)          # L11: pacing is developer-only
     r = row(page, "mps3.console.pace_ms")
     r.locator('[data-testid="setting-input"]').fill("30")
     r.locator('[data-testid="setting-input"]').press("Enter")

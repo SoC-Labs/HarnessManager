@@ -73,7 +73,7 @@ def test_listing_by_section_and_the_dev_rows_only_on_request(world):
     ctx, _, _, _ = world
     tools = ops.listing(ctx, section="tools")["rows"]
     assert tools and {r["section_id"] for r in tools} == {"tools"}
-    kits = ops.listing(ctx, section="Harness + kits")["rows"]
+    kits = ops.listing(ctx, section="Harness & kits")["rows"]
     assert {r["section_id"] for r in kits} == {"harness-kits"}
     plain = {r["key"] for r in ops.listing(ctx)["rows"]}
     every = {r["key"] for r in ops.listing(ctx, include_dev=True)["rows"]}

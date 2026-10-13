@@ -383,24 +383,24 @@ UPDATES = (
 
 KITS = (
     # K1-K2 cli/cmd_harness.py:69,73; daemon/harness_api.py:108
-    Setting("harness.channels", "list", ["stable"], "Harness + kits",
+    Setting("harness.channels", "list", ["stable"], "Harness & kits",
             "The channels the harness versions list shows"),
-    Setting("harness.source", "str", "", "Harness + kits",
+    Setting("harness.source", "str", "", "Harness & kits",
             "The harness catalogue source (empty: the update source)", owner="admin"),
     # K3-K4 planned (HARNESS_DISTRIBUTION.md:288-292; DUT_BUILD_KIT_STORAGE.md:222)
-    Setting("harness.cache_max", "size", 2_000_000_000, "Harness + kits",
+    Setting("harness.cache_max", "size", 2_000_000_000, "Harness & kits",
             "The harness download cache's cap", scope="machine", owner="admin"),
-    Setting("kits.cache_max", "size", 0, "Harness + kits",
+    Setting("kits.cache_max", "size", 0, "Harness & kits",
             "The kit cache's cap (0: no cap)", scope="machine", owner="admin"),
     # K5-K6 services/kit/service.py:80,83-86,250-260 (KitService.hub; SET-WIRE); cli/cmd_kit.py:94
-    Setting("kits.sources", "list", ["cache", "channel", "hub"], "Harness + kits",
+    Setting("kits.sources", "list", ["cache", "channel", "hub"], "Harness & kits",
             "Where a kit is looked for, in order", check=_kit_sources),
-    Setting("kits.hub_dir", "path", "", "Harness + kits", "The hub's mint archive",
+    Setting("kits.hub_dir", "path", "", "Harness & kits", "The hub's mint archive",
             scope="machine", owner="admin", env="HARNESS_MANAGER_KIT_HUB_DIR"),
     # K7 is the pack's (mps3.overlay_dirs): each pack has its own variable
     # (cli/cmd_program.py:23-25, HARNESS_MANAGER_<PACK>_OVERLAY_DIRS).
     # K9 cli/cmd_kit.py:121
-    Setting("kits.jobs", "int", 2, "Harness + kits", "Vivado threads for a kit build",
+    Setting("kits.jobs", "int", 2, "Harness & kits", "Vivado threads for a kit build",
             advanced=True, check=_between(1, 64)),
 )
 
@@ -520,3 +520,23 @@ SD_FLASH = (
 )
 CORE_ROWS = CORE_ROWS + SD_FLASH
 # --- end sd-flash ---
+
+# L11 WORDS: rows an attendee has no reason to touch. They keep their keys, defaults and
+# readers; only the menu (and `config list`) hides them until "Show developer settings" / --all.
+#: The inline ``boards.*.hub.*`` rows that repeat ``hubs.*`` (the hub's own page sets them).
+DEV_ONLY_KEYS = frozenset({
+    "debug.port_base", "debug.xvc_port_base", "updates.source",
+    *(f"boards.*.hub.{k}" for k in ("host", "url", "group", "token_file", "ca_file", "cert_file",
+                                    "key_file", "insecure", "events", "direct", "timeout_s")),
+})
+
+
+def mark_dev_only(rows, keys=DEV_ONLY_KEYS, prefixes=()):
+    """``rows`` with ``dev_only`` set on the named keys (and any key under ``prefixes``)."""
+    from dataclasses import replace
+
+    return tuple(replace(r, dev_only=True) if r.key in keys or r.key.startswith(tuple(prefixes)) else r
+                 for r in rows)
+
+
+CORE_ROWS = mark_dev_only(CORE_ROWS)
