@@ -24,7 +24,7 @@ from harness_manager_mps3.capabilities import NEEDS_LOCATE, NEEDS_PRESENCE
 from harness_manager_mps3.pack import Mps3Pack
 from harness_manager_mps3.panel import Mps3Panel, board_address, rebuilt_frame
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, V011_BARE_METAL, PanelVirtualMps3
-from tests.fakes.virtual_board import FIELDED_3F1A560F, LINUX_HARNESSD
+from tests.fakes.virtual_board import FIELDED_3F1A560F, LINUX_HARNESSD_V1 as LINUX_HARNESSD
 
 DASH = "\u2014"            # PANEL-TRUTH: a fact HM did not read (core.panel.UNKNOWN)
 #: PANEL-TRUTH: words that name a harness TYPE. A reason built from a missing feature never

@@ -54,7 +54,7 @@ from typing import Any
 from .t12_harness_shell import HarnessFakeShell
 from .virtual_board import (
     FIELDED_ILA_V011,
-    LINUX_HARNESSD,
+    LINUX_HARNESSD_V1 as LINUX_HARNESSD,
     FirmwareProfile,
     VirtualMps3,
     _needs_harness_fake,

@@ -5,8 +5,8 @@ can end up with a different one (an editable install of a platform checkout on a
 branch). Without this check that shows up much later as ``cannot import name 'slot'`` and
 a generic "internal error". Here the service names the pyverify it found and the fix.
 
-The list of what the pack needs is read from the pack's own source: every module-level
-``from pyverify... import ...`` in this package (so it cannot go stale).
+The list of what the pack needs is read from the pack's own source: every
+``from pyverify... import ...``, at module level or inside a function, in this package (so it cannot go stale).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ FIX = ("run `make clean venv` in the harness-manager checkout (it installs the v
 
 
 def needed(package_dir: Path | None = None) -> dict[str, set[str]]:
-    """``{pyverify module: {names}}`` imported at module level by this package."""
+    """``{pyverify module: {names}}`` imported anywhere in this package (module level or inside a function)."""
     root = package_dir or Path(__file__).resolve().parent
     out: dict[str, set[str]] = {}
     for path in sorted(root.glob("*.py")):
@@ -30,7 +30,7 @@ def needed(package_dir: Path | None = None) -> dict[str, set[str]]:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
-        for node in tree.body:
+        for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module and (
                     node.module == "pyverify" or node.module.startswith("pyverify.")):
                 out.setdefault(node.module, set()).update(a.name for a in node.names)
