@@ -92,9 +92,13 @@ CFG_DIR_ENV = "HARNESS_MANAGER_MPS3_OPENOCD_DIR"
 MULTICORE_DESIGN = designs.MULTICORE_DESIGN    # nanosoc_multicore: one access port per core
 DAP_TAP_IDCODE = designs.DAP_TAP_IDCODE        # nanosoc_mps3_jtag.cfg: _DAP_TAPID (silicon-verified)
 
-# Every config in DAP_DESIGN_CONFIGS creates the core as nanosoc.cpu0 and
-# defines nanosoc_halt_examine (nanosoc_mps3_jtag.cfg:84-104,
-# nanosoc_iice_chain.cfg:126-143).
+# Every config in the design manifest (designs.py) creates its first core as
+# nanosoc.cpu0 and defines nanosoc_halt_examine (nanosoc_mps3_jtag.cfg:84-104,
+# nanosoc_iice_chain.cfg:126-143). The two-core config
+# (nanosoc_mps3_multicore_jtag.cfg) also creates nanosoc.cpu1 and defines
+# nanosoc_halt_examine1; its recipe's gdb_attach lists both, from the manifest.
+# The multicore config is not proven on silicon yet (its header says so):
+# the first board session checks the IDCODE and a halt of each core.
 _GDB_ATTACH_HOOKS = (("nanosoc.cpu0", "nanosoc_halt_examine"),)
 
 
@@ -111,7 +115,9 @@ class DesignDebug:
 def design_debug(design: int) -> DesignDebug:
     """The debug recipe for design number ``design`` (``rm_id & 0xFFFF``).
 
-    ``NothingOnTargetError`` (exit 13) when the design has no debug port.
+    ``NothingOnTargetError`` (exit 13) when the design has no debug port. The recipe comes
+    from the design manifest: a single-core design gets its ``dap_configs``; nanosoc_multicore
+    gets the two-AP config, with one gdb-attach hook per core.
     """
     row = designs.DESIGNS.get(design)
     name = KNOWN_DESIGNS.get(design) or (row.name if row else f"design 0x{design:04x}")
