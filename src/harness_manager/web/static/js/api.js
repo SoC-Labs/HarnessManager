@@ -194,6 +194,8 @@ export const ENDPOINTS = Object.freeze({
   persistRestore: ["POST", "/boards/{bid}/persist/restore"],
   cosimState: ["GET", "/boards/{bid}/cosim"],                    // HM 1.2: the DUT clock
   cosimAct: ["POST", "/boards/{bid}/cosim"],
+  sensors: ["GET", "/boards/{bid}/sensors"],                     // HM 1.2: the SYSMON sensors
+  sensorsAct: ["POST", "/boards/{bid}/sensors"],
   // --- end v1.1 ---
 });
 

@@ -219,6 +219,8 @@ EXTENSION_ROUTES["kit_api"] = EXTENSION_ROUTES["kit_api"] + (
 )
 EXTENSION_ROUTES["readings_api"] = (
     ("GET", "/boards/{bid}/readings/history"),
+    ("GET", "/boards/{bid}/sensors"),                 # HM 1.2 L5a
+    ("POST", "/boards/{bid}/sensors"),
 )
 # --- end ui2 api-build ---
 
@@ -1317,3 +1319,16 @@ EXTENSION_ROUTES["bringup_api"] = (
     ("GET", "/boards/{bid}/bringup/proposal"),        # bringup-2: the proposed identity
 )
 # --- end bringup-usb ---
+
+
+# --- hm 1.2 --- (served in the mock by tests/fakes/t14_mock_api.py's hm12_register)
+EXTENSION_ROUTES["persist_api"] = (
+    ("GET", "/boards/{bid}/persist/backups"),
+    ("POST", "/boards/{bid}/persist/backup"),
+    ("POST", "/boards/{bid}/persist/restore"),
+)
+EXTENSION_ROUTES["cosim_api"] = (
+    ("GET", "/boards/{bid}/cosim"),
+    ("POST", "/boards/{bid}/cosim"),
+)
+# --- end hm 1.2 ---

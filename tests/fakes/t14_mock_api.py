@@ -446,6 +446,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # IDLE-LEASE (docs/API.md "Idle lease release", idle_api.py): the demo's boards are
     # scripted and never idle; "Keep it" answers as the real route does.
     idle_register(app, state)
+    hm12_register(app, state)          # HM 1.2: card contents, DUT clock, sensors (scripted)
     # FIX-PACK-2: the service's own tool variables (docs/API.md), scripted.
     from .fp2_mock_env import register as register_env
     register_env(app, _ok)
@@ -1090,6 +1091,46 @@ def _ui2_confirmed(body: dict[str, Any], what: str) -> None:
     if body.get("confirm") is not True:
         raise UsageError(f"to {what}, send confirm: true",
                          hint="the page asks first; the CLI asks, or takes --yes")
+
+
+def hm12_register(app: FastAPI, state: Any) -> None:
+    """HM 1.2's routes over the demo: its boards have no mint-4 features, so the clock and the
+    sensors are not offered and no card-contents backup exists yet."""
+
+    @app.get(f"{API}/boards/{{bid}}/persist/backups")
+    def persist_backups(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, backups=[], recent=False, recent_days=7)
+
+    @app.post(f"{API}/boards/{{bid}}/persist/backup")
+    def persist_backup(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, job=None, note="the demo boards have no card contents")
+
+    @app.post(f"{API}/boards/{{bid}}/persist/restore")
+    def persist_restore(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, job=None, note="the demo boards have no card contents")
+
+    @app.get(f"{API}/boards/{{bid}}/cosim")
+    def cosim_state(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, offered=False, reason="This board's image has no clock control")
+
+    @app.post(f"{API}/boards/{{bid}}/cosim")
+    def cosim_act(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, offered=False, reason="This board's image has no clock control")
+
+    @app.get(f"{API}/boards/{{bid}}/sensors")
+    def sensors(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, sensors=None, reason="This board has no sensors in its image")
+
+    @app.post(f"{API}/boards/{{bid}}/sensors")
+    def sensors_act(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, sensors=None, reason="This board has no sensors in its image")
 
 
 def idle_register(app: FastAPI, state: Any) -> None:
