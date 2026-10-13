@@ -653,7 +653,7 @@ class OsSlotAdapter(Protocol):
         """Read ``slot`` back off the card (default: the one that is not the default)."""
         ...
 
-    def reboot(self, progress: Progress | None = None, wait_s: float = 180.0) -> dict | None:
+    def reboot(self, progress: Progress | None = None, wait_s: float = 300.0) -> dict | None:
         """Reboot the board and witness it go down and come back."""
         ...
 

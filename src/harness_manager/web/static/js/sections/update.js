@@ -19,6 +19,7 @@ import {
   HarnessRollbackFoot, HarnessRollbackPanels, NOT_YET, offeredText, ReleasesCard,
 } from "./harness.js";
 import { heldLines } from "./power.js";
+import { PersistCard } from "./persist.js";
 import { ConfigSdCard, SdRecovery } from "./sd.js";
 
 const other = (x) => (x === "A" ? "B" : "A");
@@ -261,6 +262,7 @@ export function VersionsPage({ bid }) {
     <div class="stack">
       <${SdRecovery} bid=${bid} />
       ${here}
+      ${lx ? html`<${PersistCard} bid=${bid} />` : null}
     </div>
     ${lxBoth ? html`<div class="stack" data-testid="os-right">
       <${ReleasesCard} bid=${bid} linux=${lx} netboot=${kind === "netboot"} />
