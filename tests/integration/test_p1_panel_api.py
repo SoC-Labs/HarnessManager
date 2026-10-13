@@ -24,7 +24,7 @@ from harness_manager_mps3.capabilities import NEEDS_LOCATE, NEEDS_PRESENCE
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, V011_BARE_METAL, PanelVirtualMps3
 from tests.fakes.l4_service import H, hold_board
 from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for
-from tests.fakes.virtual_board import LINUX_HARNESSD
+from tests.fakes.virtual_board import LINUX_HARNESSD_V1 as LINUX_HARNESSD
 
 #: PANEL-TRUTH: words naming a harness TYPE; a reason from a missing feature never has one.
 TYPE_WORDS = ("bare metal", "bare-metal", "Linux harness")

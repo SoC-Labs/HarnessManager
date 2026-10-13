@@ -21,7 +21,7 @@ from harness_manager.core.errors import ExitCode
 from harness_manager_mps3.capabilities import NEEDS_LOCATE
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, V011_BARE_METAL, PanelVirtualMps3
 from tests.fakes.t13_daemon import LiveDaemon, engine_for
-from tests.fakes.virtual_board import LINUX_HARNESSD
+from tests.fakes.virtual_board import LINUX_HARNESSD_V1 as LINUX_HARNESSD
 
 
 def run(capsys, *argv: str) -> tuple[int, str, str]:

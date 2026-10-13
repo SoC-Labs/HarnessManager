@@ -45,7 +45,7 @@ from tests.fakes.t2_overlays import (
 from tests.fakes.virtual_board import (
     FIELDED_3F1A560F,
     FIELDED_ILA_V011,
-    LINUX_HARNESSD,
+    LINUX_HARNESSD_V1 as LINUX_HARNESSD,
     VirtualMps3,
 )
 from tests.fakes.xvc_server import FakeXvcServer
