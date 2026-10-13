@@ -241,6 +241,49 @@ class ClaimService:
         self._publish(session, out)
         return out
 
+    # -- the board's keys (ADOPT-GUI) ---------------------------------------------------------
+
+    def keys_list(self, session: Any) -> list[dict[str, Any]]:
+        """The keys the board accepts: fingerprint, type, label, ``mine`` (this PC's key)."""
+        return self._keys_adapter(session).list_keys()
+
+    def keys_preview(self, session: Any, key: str, label: str = "") -> dict[str, Any]:
+        """A pasted public key checked, nothing sent: ``{type, fingerprint, label}``. A private
+        key is refused outright (and never echoed)."""
+        return self._keys_adapter(session).preview_key(key, label)
+
+    def keys_add(self, session: Any, *, confirm: bool, key: str, label: str = "",
+                 expect_fingerprint: str = "",
+                 progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+        """Add a public key to the board's authorized keys. Never automatic: ``confirm``, the
+        fingerprint the user saw (``expect_fingerprint``), and the lease on a hub board."""
+        adapter = self._keys_adapter(session)
+        if not confirm:
+            raise RefusedError("adding a key gives its owner root on the board: it needs a "
+                               "confirmation", hint="CLI: answer the prompt or pass --yes; "
+                                                    "API: {\"confirm\": true}")
+        adapter.preview_key(key, label)            # a bad or private key stops here, before the lease
+        self.check_lease(session, what="adding a key")
+        return adapter.add_key(key, label, expect_fingerprint=expect_fingerprint,
+                               progress=progress)
+
+    def keys_remove(self, session: Any, *, confirm: bool, fingerprint: str,
+                    progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+        """Remove the key with this fingerprint. Refused for this PC's own key."""
+        adapter = self._keys_adapter(session)
+        if not confirm:
+            raise RefusedError("removing a key takes its owner's access away: it needs a "
+                               "confirmation", hint="CLI: answer the prompt or pass --yes; "
+                                                    "API: {\"confirm\": true}")
+        self.check_lease(session, what="removing a key")
+        return adapter.remove_key(fingerprint, progress=progress)
+
+    def _keys_adapter(self, session: Any) -> Any:
+        adapter = self.check_claimable(session)
+        if not hasattr(adapter, "list_keys"):
+            raise UnavailableError(CAPABILITY, "this board's claim cannot manage keys")
+        return adapter
+
     def refresh(self, session: Any) -> dict[str, Any] | None:
         out = self.status(session, refresh=True)
         if out is not None:

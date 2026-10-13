@@ -1,7 +1,9 @@
 // The SSH claim (lane LINUX-CLAIM; docs/API.md "SSH claim of a Linux harness"), on Board >
 // Access. Only a Linux harness has one: info.claim is absent on bare metal, so nothing shows.
 // "Claim with my key…" asks once more before it posts {confirm: true}: a claim gives your key
-// root on the board, and the board refuses every later one.
+// root on the board, and the board refuses every later one. "Adopt this board" (a board claimed
+// by a key this PC holds, with no record here) and "Keys" (who else may log in: add a pasted
+// public key, remove one by fingerprint) are the CLI's `board claim --adopt` and `board keys`.
 
 import { gateReason, interlock, isArmed, runJob, setArmed } from "../actions.js";
 import { call, toApiError } from "../api.js";
@@ -53,6 +55,8 @@ export function ClaimCard({ bid }) {
   // when it was pressed; the claim pins exactly it or nothing.
   const [replacing, setReplacing] = useState("");
   const [checking, setChecking] = useState(false);
+  // Adopt: the Arm box (armKey "adopt") then the button; the same checks as `board claim --adopt`.
+  const [adopting, setAdopting] = useState(false);
   const viaHub = hubRouted(c);
   // now: the button (always asks); else the automatic check on load (the service's cache)
   const checkHub = async (now) => {
@@ -130,6 +134,23 @@ export function ClaimCard({ bid }) {
       setBusy(false);
     }
   };
+  const adopt = async () => {
+    if (why) { interlock(bid, "claim", "board adopt", why); setErr({ errName: "REFUSED", message: `${why}. Nothing was run.` }); return; }
+    setBusy(true); setErr(null);
+    try {
+      await runJob("claim", { bid }, { confirm: true, adopt: true }, null, "claim");
+      setAdopting(false); setArmed(bid, "adopt", false);
+      refreshInfo(bid);
+    } catch (e) {
+      setErr(toApiError(e));      // plain words from the daemon: key refused, host key moved, ...
+    } finally {
+      setBusy(false);
+    }
+  };
+  // A board claimed by a key this PC may hold, with no record here: adopting logs in with this
+  // PC's key and pins the board's host key. A host key that changed to one never seen needs a
+  // claim with the replace option instead.
+  const canAdopt = c.state === "other" && (!changedKey || !!seenBefore);
   const ssh = sshAddress(b);
   return html`<${Card} title="SSH claim" icon="lock" testid="access-claim"
       sub="Who may log in to the board's Linux over SSH. Once claimed, slot and card changes are accepted only through it.">
@@ -147,7 +168,7 @@ export function ClaimCard({ bid }) {
       </dl>
       ${changedKey ? html`<${Reason} level=${seenBefore ? "warn" : "err"} testid="claim-hostkey"
         text=${hk.refusal && hk.refusal.message ? `${hk.refusal.message}.`
-          : seenBefore ? `Host key changed back to one seen on ${seenBefore} (${hk.reported}); on the Linux harness this is usually /persist (the user microSD) mounting or not. SSH is refused until you re-pin it: ${c.state === "unclaimed" ? "board claim" : "board claim --adopt"}, if you trust it.`
+          : seenBefore ? `Host key changed back to one seen on ${seenBefore} (${hk.reported}); on the Linux harness this is usually /persist (the user microSD) mounting or not. SSH is refused until you re-pin it: ${c.state === "unclaimed" ? "claim the board again" : "use Adopt this board below"}, if you trust it.`
           : `Host key changed: pinned ${hk.pinned}, the board reports ${hk.reported}. SSH is refused.`} />` : null}
       ${changedKey ? html`<div class="stack gap-8" data-testid="claim-hostkey-box" data-repin=${canRepin ? "yes" : "no"}>
         <dl class="kv" data-testid="claim-hostkey-keys">
@@ -190,7 +211,20 @@ export function ClaimCard({ bid }) {
         <button type="button" class="btn sm primary" data-action="access-name-after-claim"
           onClick=${() => { const args = namePrefillArgs(bid); clearNamePrefill(bid); openModal("name-board", { bid, ...args }); }}>
           <${Icon} name="tag" /> Name this board…</button></div>` : null}
-      ${(c.notes || []).map((n) => html`<${Reason} key=${n} text=${n} />`)}
+      ${(c.notes || []).filter((n) => !(canAdopt && /board claim TARGET --adopt/.test(n))).map((n) => html`<${Reason} key=${n} text=${n} />`)}
+      ${canAdopt ? html`<div class="bt-foot" data-testid="claim-adopt-box">
+        <${Reason} text="This board was claimed by a key this Harness Manager has no record of. If that key is on this PC (a claim made from here before, or with pyverify), adopt it: Harness Manager logs in with your key, checks the board's host key against what the board reports, and remembers it. Nothing on the board changes." />
+        ${adopting ? html`<${ArmBox} bid=${bid} armKey="adopt" testid="arm-adopt"
+              text="Arm: this PC holds the key that claimed this board." />
+            <button type="button" class="btn sm primary" data-action="access-adopt-confirm" disabled=${busy || !isArmed(bid, "adopt")} onClick=${adopt}
+              aria-disabled=${why ? "true" : undefined}>${busy ? html`<${Spinner} />` : null} Adopt this board</button>
+            <button type="button" class="btn ghost sm" disabled=${busy} onClick=${() => { setAdopting(false); setArmed(bid, "adopt", false); }}>Cancel</button>`
+          : html`<button type="button" class="btn sm" data-action="access-adopt" aria-disabled=${why ? "true" : undefined}
+              title=${why || "Log in with this PC's key and remember the board's host key"}
+              onClick=${() => { if (why) { setErr({ errName: "REFUSED", message: `${why}. Nothing was run.` }); interlock(bid, "claim", "board adopt", why); return; } setAdopting(true); }}>
+              <${Icon} name="lock" /> Adopt this board…</button>`}
+        ${why ? html`<span class="small muted" data-testid="reason-access-adopt">${why}</span>` : null}</div>` : null}
+      ${c.state === "mine" ? html`<${KeysBlock} bid=${bid} why=${why} />` : null}
       ${c.state === "unclaimed" && !(changedKey && !seenBefore) ? html`<div class="bt-foot">
         ${armed ? html`<${Reason} text="Your SSH key gets root on this board; the board then refuses every other key's claim and takes slot changes only over that key's SSH." />
             <button type="button" class="btn sm primary" data-action="access-claim-confirm" disabled=${busy} onClick=${claim}
@@ -209,4 +243,115 @@ export function ClaimCard({ bid }) {
       ${err ? html`<${Reason} level="err" testid="access-claim-error"
         text=${`${err.errName}: ${err.message}${err.hint ? ` (${err.hint})` : ""}${err.holder ? ` (holder: ${err.holder})` : ""}`} />` : null}
     </div><//>`;
+}
+
+
+// --- who else may log in: the board's keys (the CLI's `board keys`) -----------------------------
+// Fingerprints and labels only. A pasted key is checked on the daemon (a private key is refused
+// there, with nothing kept) and its fingerprint shown before "Add this key"; the text is dropped
+// from the page as soon as it is sent or cancelled.
+
+function KeysBlock({ bid, why }) {
+  const [keys, setKeys] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [text, setText] = useState("");
+  const [label, setLabel] = useState("");
+  const [seen, setSeen] = useState(null);          // {type, fingerprint, label} from the check
+  const [removing, setRemoving] = useState("");    // fingerprint on screen when Remove was pressed
+  const [note, setNote] = useState("");
+  const stop = () => { setAdding(false); setText(""); setLabel(""); setSeen(null); setArmed(bid, "addkey", false); };
+  const load = async () => {
+    setLoading(true); setErr(null);
+    try {
+      const { data } = await call("claimKeys", { bid });
+      setKeys(data.keys || []);
+    } catch (e) {
+      setErr(toApiError(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const check = async () => {
+    setBusy(true); setErr(null); setSeen(null); setNote("");
+    try {
+      const { data } = await call("claimKeyCheck", { bid }, { key: text, label });
+      setSeen(data.key);
+    } catch (e) {
+      setErr(toApiError(e));
+      if (/private key/i.test(String(e && e.message))) setText("");     // never keep it on screen
+    } finally {
+      setBusy(false);
+    }
+  };
+  const add = async () => {
+    if (why) { interlock(bid, "claim", "board keys add", why); setErr({ errName: "REFUSED", message: `${why}. Nothing was run.` }); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await runJob("claimKeyAdd", { bid }, { confirm: true, key: text, label, expect_fingerprint: seen.fingerprint }, null, "claim_key");
+      const k = (res && res.key) || {};
+      setNote(k.action === "already_there" ? `That key is already there (${seen.fingerprint}).` : `Added ${seen.fingerprint}.`);
+      setKeys(k.keys || keys);
+      stop();
+    } catch (e) {
+      setErr(toApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (why) { interlock(bid, "claim", "board keys remove", why); setErr({ errName: "REFUSED", message: `${why}. Nothing was run.` }); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await runJob("claimKeyRemove", { bid }, { confirm: true, fingerprint: removing }, null, "claim_key");
+      setNote(`Removed ${removing}.`);
+      setKeys(((res && res.key) || {}).keys || keys);
+      setRemoving(""); setArmed(bid, "rmkey", false);
+    } catch (e) {
+      setErr(toApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<div class="stack gap-8" data-testid="claim-keys">
+    <div class="bt-foot">
+      <button type="button" class="btn sm" data-action="access-keys-load" disabled=${loading} onClick=${load}>
+        ${loading ? html`<${Spinner} />` : html`<${Icon} name="lock" />`} ${keys ? "Refresh keys" : "Show who can log in"}</button>
+      ${!adding ? html`<button type="button" class="btn sm" data-action="access-keys-add" aria-disabled=${why ? "true" : undefined}
+          title=${why || "Let another person or PC log in: paste their public key"}
+          onClick=${() => { if (why) { setErr({ errName: "REFUSED", message: `${why}. Nothing was run.` }); interlock(bid, "claim", "board keys add", why); return; } setAdding(true); }}>
+          <${Icon} name="lock-open" /> Add a key…</button>` : null}
+      ${why ? html`<span class="small muted">${why}</span>` : null}</div>
+    ${keys ? html`<ul class="stack gap-4" data-testid="claim-keys-list">
+      ${keys.length === 0 ? html`<li class="muted small">The board lists no keys.</li>` : null}
+      ${keys.map((k) => html`<li key=${k.fingerprint} class="small">
+        <span class="mono">${k.fingerprint}</span> · ${k.label || "no label"}${k.mine ? " · this PC's key" : ""}
+        ${k.mine ? null : html` <button type="button" class="btn ghost sm" data-action="access-key-remove" disabled=${busy}
+          onClick=${() => { setRemoving(k.fingerprint); setNote(""); }}>Remove…</button>`}</li>`)}</ul>` : null}
+    ${removing ? html`<div class="bt-foot" data-testid="claim-key-remove-box">
+      <${Reason} text=${`Remove ${removing}? Whoever uses that key can no longer log in to this board. Your own key is never removed.`} />
+      <${ArmBox} bid=${bid} armKey="rmkey" testid="arm-rmkey" text="Arm: remove this key." />
+      <button type="button" class="btn sm primary" data-action="access-key-remove-confirm" disabled=${busy || !isArmed(bid, "rmkey")} onClick=${remove}>
+        ${busy ? html`<${Spinner} />` : null} Remove this key</button>
+      <button type="button" class="btn ghost sm" disabled=${busy} onClick=${() => { setRemoving(""); setArmed(bid, "rmkey", false); }}>Cancel</button></div>` : null}
+    ${adding ? html`<div class="stack gap-8" data-testid="claim-key-add-box">
+      <${Reason} text="Paste the other person's PUBLIC key: one line from their .pub file, starting ssh-ed25519 or ssh-rsa. Never a private key." />
+      <textarea class="mono small" rows="3" aria-label="Public key" data-testid="key-text" value=${text} disabled=${busy}
+        onInput=${(e) => { setText(e.target.value); setSeen(null); }}></textarea>
+      <input type="text" aria-label="Label for this key" placeholder="Label, for example Sam's laptop" data-testid="key-label" value=${label} disabled=${busy}
+        onInput=${(e) => { setLabel(e.target.value); setSeen(null); }} />
+      ${seen ? html`<${Reason} level="ok" testid="key-fingerprint" text=${`This is ${seen.type}, ${seen.fingerprint}, labelled "${seen.label}". It will get root on the board.`} />
+        <${ArmBox} bid=${bid} armKey="addkey" testid="arm-addkey" text="Arm: I checked this fingerprint with the key's owner." />` : null}
+      <div class="bt-foot">
+        ${!seen ? html`<button type="button" class="btn sm" data-action="access-key-check" disabled=${busy || !text.trim()} onClick=${check}>
+            ${busy ? html`<${Spinner} />` : null} Check the key</button>`
+          : html`<button type="button" class="btn sm primary" data-action="access-key-add-confirm" disabled=${busy || !isArmed(bid, "addkey")} onClick=${add}>
+            ${busy ? html`<${Spinner} />` : null} Add this key</button>`}
+        <button type="button" class="btn ghost sm" disabled=${busy} onClick=${stop}>Cancel</button></div></div>` : null}
+    ${note ? html`<${Reason} level="ok" testid="claim-keys-note" text=${note} />` : null}
+    ${err ? html`<${Reason} level="err" testid="claim-keys-error"
+      text=${`${err.errName}: ${err.message}${err.hint ? ` (${err.hint})` : ""}`} />` : null}
+  </div>`;
 }

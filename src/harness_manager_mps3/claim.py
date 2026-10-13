@@ -308,6 +308,124 @@ def read_claim_key(path: Path) -> tuple[bytes, list[str]]:
     return data, lines
 
 
+# --- the board's authorized keys (ADOPT-GUI): paste, check, add, remove -------------------------
+
+#: The public key types an added key may have (no ssh-dss: OpenSSH dropped it).
+KEY_TYPES_ALLOWED = ("ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384",
+                     "ecdsa-sha2-nistp521", "sk-ssh-ed25519@openssh.com",
+                     "sk-ecdsa-sha2-nistp256@openssh.com")
+KEY_LABEL_MAX = 64
+KEY_LINE_MAX = 8 * 1024
+#: The claim file (IMAGE_CONTRACT 4.2): HM edits ONLY this, atomically (tmp + sync + rename,
+#: 0600, at most 16 KiB), then runs the image's sync, which rebuilds the file the SSH server
+#: reads (/root/.ssh/authorized_keys = the image's baked keys + the claim's lines). HM never
+#: writes that derived file: a baked key is the image's, not the claim's.
+KEYS_FILE = "/persist/ssh/authorized_keys"
+KEYS_SYNC = "/usr/sbin/mps3-keys-sync"
+_PRIVATE_MARKERS = ("PRIVATE KEY", "-----BEGIN", "PuTTY-User-Key-File", "openssh-key-v1")
+PRIVATE_KEY_WORDS = ("that looks like a PRIVATE key. Never paste a private key anywhere: "
+                     "nothing was sent or kept. Paste the PUBLIC key instead (the .pub file, "
+                     "one line starting ssh-ed25519 or ssh-rsa)")
+
+
+def parse_public_key(text: str, label: str = "") -> dict[str, str]:
+    """Check one pasted OpenSSH PUBLIC key line and return ``{type, blob, fingerprint, label,
+    line}`` (``line`` is what goes in authorized_keys: type, blob, label; no options, so a pasted
+    ``command="..."`` prefix is refused). A private key is refused outright and never echoed.
+    ``UsageError`` says why in plain words."""
+    raw = str(text or "")
+    if any(m in raw for m in _PRIVATE_MARKERS):
+        raise UsageError(PRIVATE_KEY_WORDS)
+    one = raw.strip()
+    if not one:
+        raise UsageError("paste the public key first (one line, starting ssh-ed25519 or ssh-rsa)")
+    if "\n" in one or "\r" in one:
+        raise UsageError("paste ONE public key on one line (a key file with several lines: add "
+                         "them one at a time)")
+    if len(one) > KEY_LINE_MAX:
+        raise UsageError("that is too long for a public key")
+    parts = one.split(None, 2)
+    ktype = parts[0]
+    if ktype not in KEY_TYPES_ALLOWED:
+        raise UsageError("that is not an OpenSSH public key line: it must start with "
+                         "ssh-ed25519, ssh-rsa or ecdsa-sha2-... (options in front of the key "
+                         "are not accepted)")
+    if len(parts) < 2 or not _B64.match(parts[1]):
+        raise UsageError("the key text after the key type is not valid: copy the whole line "
+                         "from the .pub file")
+    try:
+        blob = base64.b64decode(parts[1], validate=True)
+    except (ValueError, TypeError) as exc:
+        raise UsageError("the key text is not valid base64: copy the whole line from the .pub "
+                         "file") from exc
+    inner = blob[4:4 + int.from_bytes(blob[:4], "big")] if len(blob) >= 4 else b""
+    if inner != ktype.encode():
+        raise UsageError("the key text does not match its key type: copy the whole line from "
+                         "the .pub file")
+    comment = parts[2] if len(parts) > 2 else ""
+    name = " ".join(str(label or comment).split())
+    if not name:
+        raise UsageError("give the key a label (for example the person's name and the PC)")
+    if len(name) > KEY_LABEL_MAX or not all(32 <= ord(c) < 127 for c in name):
+        raise UsageError(f"the label must be plain text up to {KEY_LABEL_MAX} characters")
+    return {"type": ktype, "blob": parts[1], "fingerprint": fingerprint(parts[1]),
+            "label": name, "line": f"{ktype} {parts[1]} {name}"}
+
+
+def parse_key_listing(text: str) -> list[dict[str, str]]:
+    """The keys in an authorized_keys file's text: ``{type, blob, fingerprint, label}`` each.
+    Comments, blanks and lines that are not keys are skipped."""
+    out: list[dict[str, str]] = []
+    for ln in str(text or "").splitlines():
+        parts = ln.split(None, 2)
+        if len(parts) < 2 or parts[0] not in KEY_TYPES_ALLOWED or not _B64.match(parts[1]):
+            continue
+        try:
+            fp = fingerprint(parts[1])
+        except UsageError:
+            continue
+        out.append({"type": parts[0], "blob": parts[1], "fingerprint": fp,
+                    "label": parts[2].strip() if len(parts) > 2 else ""})
+    return out
+
+
+_AWK_HAS = "awk -v b=\"$BLOB\" '{for(i=1;i<=NF;i++) if($i==b) f=1} END{exit !f}'"
+_AWK_DROP = "awk -v b=\"$BLOB\" '{for(i=1;i<=NF;i++) if($i==b) next; print}'"
+
+#: The board-side scripts (POSIX sh, busybox). The first line names the operation. Output words:
+#: nofile / there / toolarge / last / added / removed, then synced or nosync.
+KEYS_LIST_SCRIPT = f"# hm-keys list\ncat {KEYS_FILE}"
+_KEYS_COMMIT = (
+    "[ \"$(wc -c < \"$t\")\" -le 16384 ] || { rm -f \"$t\"; echo toolarge; exit 6; }\n"
+    "chmod 600 \"$t\" && sync && mv \"$t\" \"$f\" || { rm -f \"$t\"; exit 5; }\n")
+_KEYS_SYNC = f"{KEYS_SYNC} >/dev/null 2>&1 && echo synced || echo nosync\n"
+KEYS_ADD_SCRIPT = (
+    "# hm-keys add\n"
+    f"f={KEYS_FILE}; t=\"$f.hm-new\"\n"
+    "[ -f \"$f\" ] || { echo nofile; exit 3; }\n"
+    f"if {_AWK_HAS} \"$f\"; then echo \"there $f\"; exit 0; fi\n"
+    "{ cat \"$f\"; [ -s \"$f\" ] && [ -n \"$(tail -c1 \"$f\")\" ] && echo; "
+    "printf '%s\\n' \"$LINE\"; } > \"$t\" || { rm -f \"$t\"; exit 5; }\n"
+    + _KEYS_COMMIT + "echo \"added $f\"\n" + _KEYS_SYNC)
+KEYS_REMOVE_SCRIPT = (
+    "# hm-keys remove\n"
+    f"f={KEYS_FILE}; t=\"$f.hm-new\"\n"
+    "[ -f \"$f\" ] || { echo nofile; exit 3; }\n"
+    f"{_AWK_DROP} \"$f\" > \"$t\" || {{ rm -f \"$t\"; exit 5; }}\n"
+    "left=$(awk '$1 ~ /^(ssh|ecdsa|sk)-/' \"$t\" | wc -l)\n"
+    "[ \"$left\" -ge 1 ] || { rm -f \"$t\"; echo last; exit 4; }\n"
+    + _KEYS_COMMIT + "echo \"removed $f\"\n" + _KEYS_SYNC)
+
+
+def _sync_note(out: str, changed: bool) -> dict[str, Any]:
+    """Did the board's key sync run? Without it the change takes effect at the next boot (the
+    image runs the sync on every boot)."""
+    if not changed or "nosync" not in out:
+        return {}
+    return {"note": "the board saved the change but could not apply it now; it takes effect "
+                    "at the board's next boot"}
+
+
 # --- where things live ---------------------------------------------------------------------------
 
 
@@ -1485,6 +1603,126 @@ class Mps3Claim:
             argv += ["-J", jump]
         argv += ["-l", self.user(), host]
         return argv + list(command)
+
+    # -- the board's authorized keys (ADOPT-GUI) ----------------------------------------------
+
+    def own_key_fingerprints(self) -> set[str]:
+        """The fingerprints of the key(s) this PC logs in with: the public file beside the
+        configured private key (else the default claim key). Empty when none can be read."""
+        out: set[str] = set()
+        try:
+            path = self._claim_key_path(None)
+            for ln in path.read_text("ascii", "replace").splitlines():
+                with contextlib.suppress(UsageError):
+                    out.add(fingerprint(parse_key_line(ln)[1]))
+        except (OSError, UsageError):
+            pass
+        return out
+
+    def _keys_run(self, script: str, params: Mapping[str, str], what: str) -> RunResult:
+        """Run one of the key scripts over the pinned SSH (claim key only). Refused before any
+        connection when this Harness Manager is not the board's claimant."""
+        import shlex
+
+        self.lock_route(what)
+        body = "".join(f"{k}={shlex.quote(v)}\n" for k, v in params.items()) + script
+        argv = self.ssh_argv([body])          # one argument: the board's shell runs it as typed
+        res = DEFAULT_RUN(argv, SSH_TIMEOUT_S)
+        if res.returncode == 255:             # ssh itself failed (the remote script never exits so)
+            why = _stderr_line(res.stderr) or f"ssh exited with status {res.returncode}"
+            raise UnreachableError(f"{what}: SSH to the board failed ({why})",
+                                   hint="nothing was changed; `board claim-status` reads the "
+                                        "board again")
+        return res
+
+    def _keys_view(self, res_text: str) -> list[dict[str, Any]]:
+        own = self.own_key_fingerprints()
+        return [{"fingerprint": k["fingerprint"], "type": k["type"], "label": k["label"],
+                 "mine": k["fingerprint"] in own} for k in parse_key_listing(res_text)]
+
+    def list_keys(self) -> list[dict[str, Any]]:
+        """The keys the board accepts, by fingerprint and label (``mine``: the key this PC uses)."""
+        res = self._keys_run(KEYS_LIST_SCRIPT, {}, "listing the board's keys")
+        if res.returncode != 0:
+            raise RefusedError("the board has no key file to list", hint="is it claimed?")
+        return self._keys_view(res.stdout)
+
+    def preview_key(self, text: str, label: str = "") -> dict[str, str]:
+        """Check a pasted public key, nothing sent: ``{type, fingerprint, label}``."""
+        k = parse_public_key(text, label)
+        return {"type": k["type"], "fingerprint": k["fingerprint"], "label": k["label"]}
+
+    def add_key(self, text: str, label: str = "", *, expect_fingerprint: str = "",
+                progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+        """Append a public key to the board's authorized keys over the claim SSH. Idempotent:
+        a key already there is ``already_there``. ``expect_fingerprint``: the one the user
+        confirmed on screen; a different key is refused before anything is sent."""
+        say = progress or (lambda _t: None)
+        k = parse_public_key(text, label)
+        want = (expect_fingerprint or "").strip()
+        if not want or want != k["fingerprint"]:
+            raise RefusedError(
+                "the key is not the one you confirmed" if want else
+                "adding a key needs the fingerprint you confirmed",
+                hint=f"check the key again; it is {k['fingerprint']}")
+        say(f"adding {k['fingerprint']} ({k['label']}) over the board's SSH")
+        res = self._keys_run(KEYS_ADD_SCRIPT, {"BLOB": k["blob"], "LINE": k["line"]},
+                             "adding a key")
+        out = res.stdout
+        if "nofile" in out:
+            raise RefusedError("the board has no claim key file, so there is nothing to add to",
+                               hint="is the board claimed? `board claim-status TARGET`")
+        if "toolarge" in out:
+            raise RefusedError("the board's key file would pass its 16 KiB limit; nothing was "
+                               "changed", hint="remove a key you no longer need first")
+        if res.returncode != 0:
+            raise ActionFailedError("the board did not accept the key; check its log",
+                                    hint=_stderr_line(res.stderr))
+        added = any(ln.startswith("added " + KEYS_FILE) for ln in out.splitlines())
+        keys = self.list_keys()
+        if k["fingerprint"] not in {x["fingerprint"] for x in keys}:
+            raise ActionFailedError("the key was sent but the board does not list it; nothing "
+                                    "more was changed", hint="run `board keys list TARGET`")
+        return {"action": "added" if added else "already_there", "fingerprint": k["fingerprint"],
+                "label": k["label"], "keys": keys, **_sync_note(out, added)}
+
+    def remove_key(self, fp: str, *,
+                   progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+        """Remove the key with fingerprint ``fp``. Refused (nothing sent) for the key this PC
+        uses, when that key cannot be told, and for the board's last key."""
+        say = progress or (lambda _t: None)
+        fp = (fp or "").strip()
+        if not _FP.match(fp):
+            raise UsageError("name the key by its fingerprint (SHA256:...)")
+        own = self.own_key_fingerprints()
+        if not own:
+            raise RefusedError("cannot tell which key this PC logs in with, so removing a key "
+                               "could lock you out; nothing was changed",
+                               hint="check boards.<b>.ssh.key points at your private key")
+        if fp in own:
+            raise RefusedError("that is the key this PC uses to log in to the board: removing "
+                               "it would lock you out; nothing was changed",
+                               hint="remove it from a PC that logs in with a different key")
+        listing = self._keys_run(KEYS_LIST_SCRIPT, {}, "listing the board's keys").stdout
+        keys = self._keys_view(listing)
+        match = [x for x in parse_key_listing(listing) if x["fingerprint"] == fp]
+        if not match:
+            raise RefusedError(f"the board does not have a key {fp}", hint="`board keys list`")
+        if len(keys) <= 1:
+            raise RefusedError("that is the board's only key; nothing was changed")
+        say(f"removing {fp} over the board's SSH")
+        res = self._keys_run(KEYS_REMOVE_SCRIPT, {"BLOB": match[0]["blob"]}, "removing a key")
+        if "last" in res.stdout:
+            raise RefusedError("that is the board's only key; nothing was changed")
+        if res.returncode != 0:
+            raise ActionFailedError("the board did not remove the key; check its log",
+                                    hint=_stderr_line(res.stderr))
+        left = self.list_keys()
+        if fp in {x["fingerprint"] for x in left}:
+            raise ActionFailedError("the board still lists the key after removing it",
+                                    hint="run `board keys list TARGET`")
+        return {"action": "removed", "fingerprint": fp, "keys": left,
+                **_sync_note(res.stdout, True)}
 
     def _capture_host_key(self, expected_fp: str, *, fresh: bool, identity_file: str) -> str:
         """Connect once with ``accept-new`` into a scratch known_hosts and return the key line

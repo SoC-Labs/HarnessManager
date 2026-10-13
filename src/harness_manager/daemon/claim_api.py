@@ -8,7 +8,14 @@ docs/API.md "SSH claim (Linux harness)" (bearer auth and the error envelope as e
 | ``GET /boards/{bid}/claim?refresh=&hub=`` | ``{board_id, claim}``: ``claim`` is ``BoardInfo.claim`` (null on bare metal). ``refresh=true`` asks the board now, through the hub when there is one. ``hub=true`` (the app's Access card, on load): on a hub board, asks the hub, reusing an answer of the last minute |
 | ``POST /boards/{bid}/claim`` ``{confirm: true, key?, adopt?, replace_host_key?, expect_host_key?}`` (``expect_host_key``: with ``replace_host_key``, the exact fingerprint shown to the user; the claim pins it or nothing) | 202 job ``claim``; the result is ``{board_id, claim}`` with ``claim.action`` ``claimed`` or ``adopted`` |
 | ``POST /boards/{bid}/repin`` ``{confirm: true, fingerprint}`` | 202 job ``repin``; pins exactly ``fingerprint`` (the new key the user was shown) when identify and ssh both show it; the result is ``{board_id, claim}`` with ``claim.action`` ``repinned``. The lease holder only |
+| ``GET /boards/{bid}/claim/keys`` | ``{board_id, keys: [{fingerprint, type, label, mine}]}``: the keys the board accepts, read over the claim SSH (claimed by this Harness Manager only; 409 otherwise). Fingerprints only |
+| ``POST /boards/{bid}/claim/keys/check`` ``{key, label?}`` | ``{board_id, key: {type, fingerprint, label}}``: a pasted PUBLIC key checked, nothing sent. A bad or private key is 400 (usage) and is never echoed or kept |
+| ``POST /boards/{bid}/claim/keys`` ``{confirm: true, key, label?, expect_fingerprint}`` | 202 job ``claim_key``; result ``{board_id, key: {action: added or already_there, fingerprint, label, keys}}``. ``expect_fingerprint`` is the one ``keys/check`` showed; a different key is refused before anything is sent. The lease holder only |
+| ``POST /boards/{bid}/claim/keys/remove`` ``{confirm: true, fingerprint}`` | 202 job ``claim_key``; result ``{board_id, key: {action: removed, fingerprint, keys}}``. Refuses the key this PC uses, an unknown key and the last key. The lease holder only |
 | ``GET /boards/{bid}/ssh?command=`` | ``{board_id, argv}``: the pinned ``ssh [-J HUB] -l root BOARD`` (nothing is run) |
+
+Adopt is ``POST /boards/{bid}/claim`` with ``{confirm: true, adopt: true}`` (the Access card's
+"Adopt this board": the same checks as ``board claim --adopt``).
 
 Rules:
 
@@ -117,6 +124,67 @@ def register(ctx: RouteContext) -> None:
             return {"board_id": bid, "claim": st}
 
         return ctx.accepted(d.jobs.submit("repin", bid, run))
+
+    # keys routes first: "{bid:path}/claim" is greedy, so the longer paths are registered before
+    @api.get("/boards/{bid:path}/claim/keys")
+    def keys_list(bid: str) -> Any:
+        s = ctx.board(bid)
+        return _JSON(ok(board_id=bid, keys=service().keys_list(s)))
+
+    @api.post("/boards/{bid:path}/claim/keys/check")
+    def keys_check(bid: str, body: JsonBody = None) -> Any:
+        s = ctx.board(bid)
+        b = _obj(body)
+        info = service().keys_preview(s, _opt_str(b, "key") or "", _opt_str(b, "label") or "")
+        return _JSON(ok(board_id=bid, key=info))
+
+    @api.post("/boards/{bid:path}/claim/keys/remove")
+    def keys_remove(bid: str, body: JsonBody = None) -> Any:
+        s = ctx.board(bid)
+        b = _obj(body)
+        if not _bool(b, "confirm", False):
+            raise RefusedError("removing a key takes its owner's access away: it needs a "
+                               "confirmation", hint="send {\"confirm\": true, \"fingerprint\": "
+                                                    "\"SHA256:...\"}")
+        fingerprint = _opt_str(b, "fingerprint")
+        if not fingerprint:
+            raise RefusedError("name the key to remove by its fingerprint",
+                               hint="send {\"fingerprint\": \"SHA256:...\"}")
+        svc = service()
+        with d.gates.op(bid):
+            svc.check_claimable(s)
+            svc.check_lease(s, what="removing a key")
+
+        def run(progress: Callable[[str, int, int], None]) -> Any:
+            out = svc.keys_remove(s, confirm=True, fingerprint=fingerprint,
+                                  progress=lambda text: progress(text, 0, 0))
+            return {"board_id": bid, "key": out}
+
+        return ctx.accepted(d.jobs.submit("claim_key", bid, run))
+
+    @api.post("/boards/{bid:path}/claim/keys")
+    def keys_add(bid: str, body: JsonBody = None) -> Any:
+        s = ctx.board(bid)
+        b = _obj(body)
+        if not _bool(b, "confirm", False):
+            raise RefusedError("adding a key gives its owner root on the board: it needs a "
+                               "confirmation", hint="send {\"confirm\": true, \"key\": \"ssh-...\", "
+                                                    "\"expect_fingerprint\": \"SHA256:...\"}")
+        key = _opt_str(b, "key") or ""
+        label = _opt_str(b, "label") or ""
+        expect = _opt_str(b, "expect_fingerprint") or ""
+        svc = service()
+        with d.gates.op(bid):
+            svc.check_claimable(s)
+            svc.keys_preview(s, key, label)               # a bad or private key stops here
+            svc.check_lease(s, what="adding a key")
+
+        def run(progress: Callable[[str, int, int], None]) -> Any:
+            out = svc.keys_add(s, confirm=True, key=key, label=label, expect_fingerprint=expect,
+                               progress=lambda text: progress(text, 0, 0))
+            return {"board_id": bid, "key": out}
+
+        return ctx.accepted(d.jobs.submit("claim_key", bid, run))
 
     @api.get("/boards/{bid:path}/ssh")
     def ssh_argv(bid: str, command: str | None = None) -> Any:

@@ -15,7 +15,7 @@ from harness_manager.services import reset_guard
 
 from .context import Ctx
 from .guard import guard_consent, is_reboot_line
-from .output import Result, StderrProgress, reading_human, reading_json, reading_row
+from .output import TSV_COLUMNS, Result, StderrProgress, reading_human, reading_json, reading_row
 
 # --- reset ---------------------------------------------------------------------------------
 
@@ -244,4 +244,118 @@ def cmd_sd(ctx: Ctx) -> int:
     ctx.emit(Result("sd restore", {"board_id": cand.board_id, "backup": rec},
                     rows=[[cand.board_id, rec.path, rec.sha256]],
                     human=[f"restored   {cand.board_id} SD from {rec.path}"]))
+    return ExitCode.OK
+
+
+# --- board keys: who else may log in (ADOPT-GUI) -------------------------------------------------
+#
+#   harness-manager board keys list   TARGET
+#   harness-manager board keys add    TARGET (--key "ssh-ed25519 AAAA..." | --key-file FILE.pub)
+#                                            [--label NAME] [--yes]
+#   harness-manager board keys remove TARGET --fingerprint SHA256:... [--yes]
+#
+# ``cmd_claim.register`` adds the group to ``board`` with ``add_keys_parser`` and routes
+# ``board_cmd == "keys"`` to ``cmd_keys``. Output shows fingerprints only, never a key.
+
+KEYS_TSV: tuple[str, ...] = ("BOARD_ID", "FINGERPRINT", "TYPE", "LABEL", "MINE", "ACTION")
+
+
+def add_keys_parser(sub, parents) -> None:
+    """Add ``keys`` (list, add, remove) to the ``board`` group's subparsers."""
+    TSV_COLUMNS.setdefault("board keys", KEYS_TSV)
+    kp = sub.add_parser(
+        "keys", help="who may log in to a claimed board: list, add or remove a public key "
+                     "(over the claim's SSH; add and remove ask first and need the lease)",
+        description="The public keys a claimed Linux harness accepts. Add a colleague's key "
+                    "(one line from their .pub file) or a second PC's; remove one by its "
+                    "fingerprint. Never the key this PC uses. Private keys are refused.",
+        parents=list(parents), epilog=f"--tsv columns: {' '.join(KEYS_TSV)}")
+    ks = kp.add_subparsers(dest="keys_cmd", required=True, metavar="ACTION")
+    pa = ks.add_parser("list", help="the keys the board accepts, by fingerprint and label",
+                       parents=list(parents))
+    pa.set_defaults(keys_cmd="list")
+    ad = ks.add_parser("add", help="add a public key (asks first, shows its fingerprint)",
+                       parents=list(parents))
+    ad.add_argument("--key", default=None, metavar="LINE",
+                    help="the PUBLIC key line to add (ssh-ed25519 AAAA... comment)")
+    ad.add_argument("--key-file", default=None, metavar="FILE",
+                    help="a .pub file holding ONE public key line")
+    ad.add_argument("--label", default="", metavar="NAME",
+                    help="who or what this key is (default: the key's own comment)")
+    ad.add_argument("--yes", action="store_true", help="do not ask")
+    rm = ks.add_parser("remove", help="remove a key by fingerprint (asks first; never this PC's "
+                                      "own key)", parents=list(parents))
+    rm.add_argument("--fingerprint", required=True, metavar="SHA256:...",
+                    help="the key to remove, as `board keys list` shows it")
+    rm.add_argument("--yes", action="store_true", help="do not ask")
+
+
+def _keys_service(ctx: Ctx):
+    from harness_manager.core.errors import UnavailableError
+
+    svc = getattr(ctx.engine, "board_claim", None)
+    if svc is None:
+        raise UnavailableError("ssh_claim", "this engine has no SSH claim service (update "
+                                            "harness-manager-daemon, or set "
+                                            "HARNESS_MANAGER_NO_DAEMON=1)")
+    return svc
+
+
+def _keys_rows(board_id: str, keys: list[dict], action: str = "") -> list[list]:
+    return [[board_id, k["fingerprint"], k["type"], k["label"], "yes" if k.get("mine") else "no",
+             action] for k in keys]
+
+
+def _keys_human(keys: list[dict]) -> list[str]:
+    return [f"{k['fingerprint']}  {k['label'] or '(no label)'}{'  (this PC)' if k.get('mine') else ''}"
+            for k in keys] or ["no keys"]
+
+
+def cmd_keys(ctx: Ctx) -> int:
+    a = ctx.args
+    action = a.keys_cmd
+    with ctx.board(note="board keys") as (cand, session):
+        svc = _keys_service(ctx)
+        bid = cand.board_id
+        if action == "list":
+            keys = svc.keys_list(session)
+            out, rows, human = {"keys": keys}, _keys_rows(bid, keys), _keys_human(keys)
+        elif action == "add":
+            if bool(a.key) == bool(a.key_file):
+                raise UsageError("give the key with --key LINE or --key-file FILE (one of them)")
+            if a.key_file:
+                try:
+                    text = Path(a.key_file).expanduser().read_text("utf-8", "replace")
+                except OSError as exc:
+                    raise UsageError(f"cannot read {a.key_file}: {exc.strerror or exc}") from exc
+            else:
+                text = a.key
+            lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
+            if a.key_file and len(lines) > 1 and "PRIVATE" not in text and "-----" not in text:
+                text = lines[0]                      # a .pub file's first key; a private key
+                                                     # file goes whole to the check and is refused
+            info = svc.keys_preview(session, text, a.label)    # private/bad keys stop here
+            svc.check_claimable(session)
+            svc.check_lease(session, what="adding a key")
+            ctx.confirm(f"add key {info['fingerprint']} ({info['label']}) to {bid}? That key "
+                        "gets root on the board")
+            res = svc.keys_add(session, confirm=True, key=text, label=a.label,
+                               expect_fingerprint=info["fingerprint"], progress=ctx.note)
+            keys = res["keys"]
+            out = {"key": {k: v for k, v in res.items() if k != "keys"}, "keys": keys}
+            word = "already there" if res["action"] == "already_there" else "added"
+            rows = _keys_rows(bid, [k for k in keys if k["fingerprint"] == res["fingerprint"]],
+                              res["action"])
+            human = [f"{word}  {res['fingerprint']}  {res['label']}", *_keys_human(keys)]
+        else:
+            svc.check_claimable(session)
+            svc.check_lease(session, what="removing a key")
+            ctx.confirm(f"remove key {a.fingerprint} from {bid}? Its owner loses access")
+            res = svc.keys_remove(session, confirm=True, fingerprint=a.fingerprint,
+                                  progress=ctx.note)
+            keys = res["keys"]
+            out = {"key": {k: v for k, v in res.items() if k != "keys"}, "keys": keys}
+            rows = [[bid, res["fingerprint"], "", "", "", "removed"]]
+            human = [f"removed  {res['fingerprint']}", *_keys_human(keys)]
+    ctx.emit(Result("board keys", {"board_id": bid, **out}, rows=rows, human=human))
     return ExitCode.OK
