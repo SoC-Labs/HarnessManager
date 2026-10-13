@@ -15,6 +15,12 @@
 >         -c init -c nanosoc_halt_pc -c resume -c shutdown
 > ```
 
+> **Quickstart nanoSoC (design `0x000B`, rm_nanosoc_qs v3):** use
+> `nanosoc_qs_mps3_jtag.cfg` instead: the same 6921 `remote_bitbang` transport,
+> but the TAP is the Cortex-M0 **JTAG-DP** (IDCODE `0x0ba01477`, one AP).
+> Copied verbatim from the kit `qs-mps3-0001000b-v3`; mps3-debug's `designs.conf`
+> maps `0x000B` to it. Unproven on silicon (RTL simulation only).
+
 The shell exposes **two independent debug transports** over the one
 Ethernet port (docs/contracts/net-protocol.md v0.2 port map;
 ARCHITECTURE_SPEC.md §10). They are consumed by **different tools** — only

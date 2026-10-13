@@ -94,13 +94,15 @@ class HarnessFakeShell(FakeShell):
                  stats_extra: dict[str, Any] | None = None,
                  ssh_claimed: bool = False, ssh_host_key_sha256: str = "SHA256:fake-host-key",
                  mac: str = "02004d505300", dhcp: bool = False,
-                 refuse_after_failed_push_s: float = 0.0, **kwargs: Any) -> None:
+                 refuse_after_failed_push_s: float = 0.0,
+                 fake_profile: str | None = None, **kwargs: Any) -> None:
         self.upstream = use_upstream()
         if self.upstream:
             # Upstream validates `features` against the firmware's names. The names only
             # this repo's fakes model (the panel's R1-R3, uart_baud, ...) go on after.
             super().__init__(
-                host, profile="linux" if impl == "linux" else "bare-metal", impl=impl,
+                host, profile=fake_profile or ("linux" if impl == "linux" else "bare-metal"),
+                impl=impl,
                 features=tuple(f for f in features if f in _UPSTREAM_FEATURES),
                 lmb_kb=lmb_kb, v011_verbs=v011_verbs,
                 omit_diag_keys=omit_diag_keys, identify=identify, identify_port=identify_port,

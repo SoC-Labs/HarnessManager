@@ -32,7 +32,8 @@ import weakref
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from pyverify.testing.fakeshell import FakeShell
+from pyverify.mint4 import MINT4_FEATURES
+from pyverify.testing.fakeshell import LINUX_PROFILE_FEATURES, FakeShell
 
 from harness_manager.core.model import Candidate, Link, LinkKind
 from harness_manager.core.transport import register_fake_serial, unregister_fake_serial
@@ -50,6 +51,9 @@ SHELL_0x3F1A560F = 0x3F1A560F
 #: PLACEHOLDERS until the mints are fielded (see the module docstring).
 ILA_MINT_STATIC_ID_PLACEHOLDER = 0x72BB0A36   # real: build_mint_2026_10/prod/static_id.txt (2026-09-23 14:56), not yet fielded
 LINUX_MINT3_STATIC_ID_PLACEHOLDER = 0x11C30003
+#: The Linux harness static the fielded v2.x images run on (RC2; the same id the kit and
+#: build-guide tests use). Real, not a placeholder.
+LINUX_V21_STATIC_ID = 0x44EE76D5
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,9 @@ class FirmwareProfile:
     version_extra: dict = field(default_factory=dict)   # additive version keys
     reboot_outage_s: float = 0.5            # the `reboot` verb's outage in the fake
     static_id_final: bool = True            # False while static_id is a placeholder
+    fake_profile: str | None = None         # FakeShell profile to force (e.g. "linux_mint4")
+    fake_kwargs: dict = field(default_factory=dict)   # extra FakeShell constructor knobs (usd_slot_mib, ...)
+    fake_attrs: dict = field(default_factory=dict)    # FakeShell attributes set after construction
 
 
 FIELDED_3F1A560F = FirmwareProfile(
@@ -143,9 +150,43 @@ def linux_harnessd_profile(static_id: int | None = None) -> FirmwareProfile:
         omit_diag_keys=LINUX_OMITTED_DIAG_KEYS, reboot_outage_s=1.0, static_id_final=final)
 
 
+#: 2.1.0 packed: major<<24 | minor<<16 | patch<<8 | flags.
+_VER32_2_1_0 = 0x02010000
+
+
+def linux_v21_profile(static_id: int = LINUX_V21_STATIC_ID) -> FirmwareProfile:
+    """The v2.1 Linux harness (mint 3 static): the FakeShell ``linux`` profile's
+    feature set (usd, slot, xvc_lock, lcd_mirror, identity, locate, presence, panel on
+    top of the v0.11 names), real static id, harness 2.1.0."""
+    return replace(
+        linux_harnessd_profile(static_id), name=f"linux-v21-0x{static_id:08X}",
+        harness_version="2.1.0", harness_sha="unknown", features=tuple(LINUX_PROFILE_FEATURES),
+        usr_access=_VER32_2_1_0, harness_ver32=_VER32_2_1_0, static_id_final=True)
+
+
+def linux_mint4_profile(static_id: int = LINUX_V21_STATIC_ID, *, usd_slot_mib: int = 32,
+                        usd_report_store_ver: bool = True) -> FirmwareProfile:
+    """A mint-4 board: FakeShell profile ``linux_mint4`` (net-protocol v0.20): the linux
+    set plus hostio, cosim, sysmon, mccif, mcc_local. Knobs: ``usd_slot_mib=8`` is a card
+    formatted by an older harness; ``usd_report_store_ver=False`` an old shell that
+    reports no ``slot_mb``/``store_ver``."""
+    return replace(
+        linux_v21_profile(static_id), name=f"linux-mint4-0x{static_id:08X}",
+        harness_version="2.2.0", harness_ver32=0x02020000, usr_access=0x02020000,
+        features=tuple(LINUX_PROFILE_FEATURES) + tuple(MINT4_FEATURES),
+        fake_profile="linux_mint4",
+        fake_kwargs={"usd_slot_mib": usd_slot_mib},
+        # not a constructor argument upstream: an attribute on the built shell
+        fake_attrs={"usd_report_store_ver": usd_report_store_ver})
+
+
 FIELDED_ILA_MINT_BAKE = ila_mint_bake_profile()
 FIELDED_ILA_V011 = ila_v011_profile()
-LINUX_HARNESSD = linux_harnessd_profile()
+#: mint 3 / harness 1.0.0, as the pack's older tests were written against.
+LINUX_HARNESSD_V1 = linux_harnessd_profile()
+#: The current Linux harness (v2.1).
+LINUX_HARNESSD = linux_v21_profile()
+LINUX_MINT4 = linux_mint4_profile()
 
 
 #: Where a virtual board's ports come from: below every OS's ephemeral range (Linux 32768+,
@@ -256,13 +297,16 @@ class VirtualMps3:
                 identify=profile.identify, omit_diag_keys=profile.omit_diag_keys,
                 version_extra=profile.version_extra, reboot_outage_s=profile.reboot_outage_s,
                 mode=mode, unit=unit,
-                identify_port=self.board_ports.identify_port if responder else 0, **common)
+                identify_port=self.board_ports.identify_port if responder else 0,
+                fake_profile=profile.fake_profile, **profile.fake_kwargs, **common)
         else:
             if _FAKESHELL_HAS_IDENTIFY:
                 # pyverify's FakeShell defaults identify_port to the real 6899; this board
                 # runs no responder, so it reports none (VirtualMps3.identify_port == 0).
                 common["identify_port"] = 0
             self.shell = FakeShell("127.0.0.1", features=profile.features, **common)
+        for attr, value in profile.fake_attrs.items():
+            setattr(self.shell, attr, value)
         self._keepalive: FakeIdentifyResponder | None = None
         # boot_s=3 so a reboot is observable over Ethernet (the witness needs
         # two failed 1 s pings) when a test runs on the real clock.

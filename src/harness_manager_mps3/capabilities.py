@@ -43,6 +43,28 @@ NEEDS_ETHERNET_LAN = ("needs an Ethernet link on the board's own network (identi
 HARNESS_MCC = ("mccif", "mcc_local", "mcc")
 NEEDS_MCC_HARNESS = "harness firmware with 'mccif' or 'mcc_local' (net-protocol v0.18)"
 
+#: Mint 4 (net-protocol v0.20) feature names. Gate on these NAMES, never on the protocol
+#: version (contract, "Mint 4"). The verb ``mcc`` exists when either MCC name is reported.
+HOSTIO, SYSMON, MCCIF, MCC_LOCAL, COSIM = "hostio", "sysmon", "mccif", "mcc_local", "cosim"
+#: The user card's OS slots (the Linux harness's ``slot`` verbs) and design store (``usd``).
+SLOT, USD = "slot", "usd"
+
+#: Pack capability names for the mint-4 surface and the card. Declarations only: the
+#: adapters that serve them come later.
+HOSTIO_CAP = "mps3.hostio"
+SENSORS_CAP = "mps3.sensors"
+MCC_CAP = "mps3.mcc"
+COSIM_CAP = "mps3.cosim"
+OS_SLOTS_CAP = "mps3.os_slots"
+DESIGN_STORE_CAP = "mps3.design_store"
+
+_ETH_HUB = (L.ETHERNET, L.HUB)
+
+
+def _via_names(names: tuple[str, ...], *links: L) -> tuple:
+    """One route per feature name, on each link: any name satisfies the capability."""
+    return tuple(via(link, features=(n,)) for n in names for link in links)
+
 
 def _via_harness_mcc(*links: L) -> tuple:
     """One route per harness MCC feature name (any of them; ``mcc status`` says the route)."""
@@ -120,6 +142,24 @@ SPECS: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(C.PRESENCE, "Show who is connected on the panel",
                    (via(L.ETHERNET, features=("presence",)), via(L.HUB, features=("presence",))),
                    needs_hint=NEEDS_PRESENCE),
+    # --- Mint 4 (net-protocol v0.20), gated on feature NAMES only. ---
+    CapabilitySpec(HOSTIO_CAP, "Host I/O to the DUT (hostio)", _via_names((HOSTIO,), *_ETH_HUB),
+                   needs_hint="harness firmware that reports 'hostio' (mint 4)"),
+    CapabilitySpec(SENSORS_CAP, "Board sensors (sensors)", _via_names((SYSMON,), *_ETH_HUB),
+                   needs_hint="harness firmware that reports 'sysmon' (mint 4)"),
+    CapabilitySpec(MCC_CAP, "Board controller through the harness (mcc)",
+                   _via_names((MCCIF, MCC_LOCAL), *_ETH_HUB),
+                   needs_hint=NEEDS_MCC_HARNESS),
+    CapabilitySpec(COSIM_CAP, "Co-simulation clock and debug (cosim)",
+                   _via_names((COSIM,), *_ETH_HUB),
+                   needs_hint="harness firmware that reports 'cosim' (mint 4)"),
+    # The user microSD card: OS slots (the slot verbs) and the design store (usd).
+    CapabilitySpec(OS_SLOTS_CAP, "OS slots on the user card",
+                   _via_names((SLOT,), *_ETH_HUB, L.SSH),
+                   needs_hint="the Linux harness with OS slots (harness feature 'slot')"),
+    CapabilitySpec(DESIGN_STORE_CAP, "Design store on the user card",
+                   _via_names((USD,), *_ETH_HUB),
+                   needs_hint="harness firmware with the user-card store (harness feature 'usd')"),
     # The live, pixel-exact LCD mirror (lane LM2, docs/design/LCD_MIRROR.md §7.1). ``lcd_mirror``
     # is an ENGINE name in version.features (net-protocol v0.15: no bit), matched by name. The
     # board serves it on its loopback only, reached over the claimed board SSH: the Ethernet or
