@@ -1057,13 +1057,19 @@ function Proposal({ bid, w }) {
   </div>`;
 }
 
+// A board in stage0 rescue cannot be named yet: its real next step is the power-cycle.
+export function nextTitle({ linuxUp, rescue }) {
+  if (rescue) return "Next: power-cycle it, then name it";
+  return linuxUp ? "Next: claim it, then name it" : "Next: name it";
+}
+
 function NextStep({ bid, w }) {
   const ok = !!(w.witness && w.witness.state === "running");
   const rescue = !!(w.witness && w.witness.state === "rescue");
   const why = ok ? "" : rescue ? "the board is in stage0 RESCUE: do step 5, power-cycle it, then wait for the harness again (step 4)"
     : "once the harness answers (step 4)";
   const linuxUp = ok && w.witness.impl === "linux";
-  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title=${linuxUp ? "Next: claim it, then name it" : "Next: name it"} state="" testid="bu-step-next">
+  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title=${nextTitle({ linuxUp, rescue })} state="" testid="bu-step-next">
     <p class="small secondary" data-testid="bu-next-text">${linuxUp
       ? "Every new board starts as MPS3, 192.168.10.101 (the generic image). First claim its SSH on Board > Access (the name is set over that claim); once it is claimed, name it: the dialog sets its name, a random MAC and its own IP."
       : "Every new board starts as MPS3, 192.168.10.101 (the generic image). On Board > Access, name it: the dialog sets its name, a random MAC and its own IP."}</p>
