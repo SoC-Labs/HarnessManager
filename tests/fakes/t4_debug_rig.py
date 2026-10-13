@@ -22,7 +22,8 @@ import pytest
 from tests.fakes.stub_openocd import make_wrapper, read_log
 
 STUB = Path(__file__).with_name("stub_openocd.py")
-CFG_NAMES = ("nanosoc_mps3_jtag.cfg", "nanosoc_iice_chain.cfg", "nanosoc_ops.tcl")
+CFG_NAMES = ("nanosoc_mps3_jtag.cfg", "nanosoc_iice_chain.cfg", "nanosoc_mps3_multicore_jtag.cfg",
+             "nanosoc_ops.tcl")
 
 
 @dataclass

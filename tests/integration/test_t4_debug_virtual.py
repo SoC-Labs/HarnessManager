@@ -178,10 +178,14 @@ def test_greybox_has_nothing_on_target(rig, jtag, vboard, debug):
     assert rig.runs() == [] and jtag.accepted == 0           # never spawned, never dialled
 
 
-def test_multicore_says_its_config_does_not_exist_yet(rig, jtag, tmp_path, debug):
+def test_multicore_uses_the_two_core_config_with_a_hook_per_core(rig, jtag, tmp_path, debug):
     with VirtualMps3(tmp_path / "mc", boot_rm_id=MULTICORE) as vb:
-        with pytest.raises(NothingOnTargetError, match="two-AP config not available yet"):
-            debug.up(open_session(vb, jtag.port))
+        st = debug.up(open_session(vb, jtag.port))
+        argv = rig.runs()[-1]
+        assert argv[argv.index("-f") + 1] == "nanosoc_mps3_multicore_jtag.cfg"
+        assert st.config[0] == "nanosoc_mps3_multicore_jtag.cfg"
+        hooks = [a for a in argv if "gdb-attach" in a]
+        assert any("nanosoc.cpu0" in h for h in hooks) and any("nanosoc.cpu1" in h for h in hooks)
 
 
 def test_iice_uses_the_two_tap_chain_config(rig, jtag, tmp_path, debug):
