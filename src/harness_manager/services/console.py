@@ -1056,10 +1056,35 @@ class ConsoleBroker:
             if rate.get("connected") is False:      # the pack says nothing drives it (uart1)
                 row["connected"] = False
                 row["connected_reason"] = str(rate.get("connected_reason") or rate["reason"] or "")
+            if rate.get("carries"):                 # hostio1: what the port carries (mint 4)
+                row["carries"] = str(rate["carries"])
             if key != name:
                 row["alias_of"] = key
             rows.append(row)
         return rows
+
+    def hostio(self, session: BoardSession) -> dict[str, Any]:
+        """The DUT console pins' mode (the ``hostio`` verb, mint 4): ``{mode, pending,
+        changing, held, target_rst, ch0, ch1, drops, note}``. A board without it:
+        ``UnavailableError``. Not paced, not cached: it is one small read."""
+        fn = getattr(getattr(session, "consoles", None), "hostio_status", None)
+        if not callable(fn):
+            raise UnavailableError("hostio", "this board has no hostio support")
+        return dict(fn())
+
+    def hostio_set(self, session: BoardSession, mode: str) -> dict[str, Any]:
+        """Switch the DUT's console pins to ``mode`` (``console`` or ``hostio4``) from its
+        next design load. Claim-locked (the pack goes through the board's SSH); refused in
+        words when a design is running (``RefusedError``). Returns the new view plus the
+        board's answer under ``result``."""
+        fn = getattr(getattr(session, "consoles", None), "hostio_set_mode", None)
+        if not callable(fn):
+            raise UnavailableError("hostio", "this board has no hostio support")
+        result = dict(fn(mode))
+        view = self.hostio(session)
+        with self._lock:
+            self._baud_cache.pop(session.candidate.board_id, None)
+        return {**view, "result": result}
 
     def set_baud(self, session: BoardSession, name: str, baud: int) -> dict[str, Any]:
         """Change console ``name``'s rate; ``0`` goes back to its default. ``{name, baud, source}``.

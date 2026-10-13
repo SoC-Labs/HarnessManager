@@ -77,7 +77,14 @@ from harness_manager.core.model import Candidate, Link, LinkKind
 from harness_manager.core.proc import no_window
 from harness_manager.transports import tcp_serial as _tcp_serial  # noqa: F401 - registers tcp://
 
-from .constants import CONSOLE_PORTS, CONTROL_PORT, JTAG_RBB_PORT, PUSH_PORT, XVC_PORT
+from .constants import (
+    CONSOLE_PORTS,
+    CONTROL_PORT,
+    HOSTIO_ADP_PORT,
+    JTAG_RBB_PORT,
+    PUSH_PORT,
+    XVC_PORT,
+)
 
 log = logging.getLogger(__name__)
 
@@ -122,6 +129,16 @@ DEFAULT_REMOTE_PORTS: dict[str, int] = {
     "control": CONTROL_PORT, "push": PUSH_PORT, "rbb": JTAG_RBB_PORT,
     **CONSOLE_PORTS, "xvc": XVC_PORT,
 }
+
+
+#: Board ports the hub tunnel must never forward: claim-gated (mint 4 hostio ADP, 6933). They
+#: are reachable only over the claim SSH, so a ports list that names one is a mistake.
+CLAIM_GATED_PORTS = frozenset({HOSTIO_ADP_PORT})
+
+
+def forwardable(ports: Mapping[str, int]) -> dict[str, int]:
+    """``ports`` without the claim-gated ones."""
+    return {n: p for n, p in ports.items() if p not in CLAIM_GATED_PORTS}
 
 
 # --- via: how a candidate names its route ------------------------------------------------
@@ -938,7 +955,7 @@ def open_reach(candidate: Candidate, remote_ports: Mapping[str, int], *,
     from .shell import parse_endpoint
 
     rhost, rport = parse_endpoint(eth.address, CONTROL_PORT)
-    ports = dict(remote_ports)
+    ports = forwardable(remote_ports)
     ports["control"] = rport
     forwards = [Forward(name, rhost, port) for name, port in ports.items() if port]
     if jump is None:
@@ -967,10 +984,10 @@ def _open_hub_reach(candidate: Candidate, eth: Link, remote_ports: Mapping[str, 
     def fallback(plan: Any) -> Reach | None:
         return open_reach(with_via(replace(candidate, links=tuple(
             Link(lk.kind, lk.address, lk.detail, via="") if lk is eth else lk
-            for lk in candidate.links)), f"{VIA_SSH}:{ssh_host}"), remote_ports,
+            for lk in candidate.links)), f"{VIA_SSH}:{ssh_host}"), forwardable(remote_ports),
             launcher=launcher, ssh_g=ssh_g, jump=cfg.jump if ssh_host == cfg.host else "")
 
-    return open_hub_reach(eth.address, remote_ports, client=client,
+    return open_hub_reach(eth.address, forwardable(remote_ports), client=client,
                           direct=rest.direct if rest is not None else "never",
                           ssh_host=ssh_host, ssh_fallback=fallback, control_port=CONTROL_PORT)
 
