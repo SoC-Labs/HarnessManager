@@ -30,6 +30,8 @@ export const ARM_TEXT = {
   power_cycle: "Arm: I understand this cuts the board's power; everything on it stops and it boots from its SD.",
   restore: "Arm: I understand this swaps the partition to the greybox; the DUT stops.",
   reset_shell: "Arm: I understand every console and the debug session drop while the shell restarts.",
+  warm_reset: "Arm: I understand this restarts the whole board like its reset button; every console and the DUT restart, and the debug session drops.",
+  mcc_reboot: "Arm: I understand this powers the board off and on through its controller; everything on it stops and it boots again (2 to 3 minutes).",
 };
 
 export function resetTargets(bid) {
@@ -99,8 +101,22 @@ export function rebootLines(ev) {
   }
   if (ev.fpga_file) out.push({ kind: "out", text: `MCC loaded ${ev.fpga_file}` });
   for (const line of [].concat(ev.down_evidence || [])) out.push({ kind: "hint", text: `down: ${line}` });
-  if (ev.up_evidence) out.push({ kind: "hint", text: `up: ${typeof ev.up_evidence === "object" ? JSON.stringify(ev.up_evidence) : ev.up_evidence}` });
+  if (ev.up_evidence) out.push({ kind: "hint", text: `up: ${evidenceWords(ev.up_evidence)}` });
   return out;
+}
+
+// Evidence as a sentence, never as JSON: a string stays, a list of lines is joined, an object
+// becomes "name: value" pairs in plain words.
+export function evidenceWords(v) {
+  if (v === undefined || v === null || v === "") return "";
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v.map(evidenceWords).filter(Boolean).join("; ");
+  if (typeof v === "object") {
+    return Object.entries(v)
+      .map(([k, x]) => `${k.replace(/_/g, " ")}: ${evidenceWords(x) || "none"}`)
+      .join("; ");
+  }
+  return String(v);
 }
 
 // --- the supply's cycle -----------------------------------------------------------------------
@@ -165,6 +181,72 @@ function shellSpec(bid) {
   };
 }
 
+// --- the board's own controller (HM 1.2, L5b): power-cycle and warm reset, no USB cable -------------
+
+export const MCC_WAIT_TEXT = "waiting for the board to come back (about 2-3 minutes)";
+const MCC_PHASE_TEXT = {
+  sent: `the board accepted the request; ${MCC_WAIT_TEXT}`,
+  down: `the board has gone down; ${MCC_WAIT_TEXT}`,
+  up: "the board answers again; checking it restarted through its controller",
+};
+const WARM_PHASE_TEXT = {
+  sent: "the board accepted the request and is about to restart",
+  down: "the board is restarting; waiting for it to answer (about 1 minute)",
+  up: "the board answers again; checking its uptime started over",
+};
+
+export function mccRebootSpec(bid) {
+  return {
+    key: "mcc_reboot", label: "Power-cycle", busyLabel: "Power-cycling...", budgetS: REBOOT_BUDGET_S,
+    command: "mcc reboot",
+    run: (ctx) => runJob("powerCycle", { bid }, { via: "mcc" },
+      (d) => ctx.progress(MCC_PHASE_TEXT[d.phase] || `${MCC_WAIT_TEXT}`, d.phase), "power_cycle"),
+    render: mccRebootLines,
+    renderError: heldLines,
+    onDone: () => { loadPower(bid); scheduleRefresh(bid, 200); },
+  };
+}
+
+export function warmResetSpec(bid) {
+  return {
+    key: "warm_reset", label: "Warm reset", busyLabel: "Restarting...", budgetS: 240,
+    command: "reset mcc_warm",
+    run: (ctx) => runJob("powerCycle", { bid }, { via: "mcc_warm" },
+      (d) => ctx.progress(WARM_PHASE_TEXT[d.phase] || "restarting the board", d.phase), "reboot"),
+    render: warmResetLines,
+    renderError: heldLines,
+    onDone: () => { loadPower(bid); scheduleRefresh(bid, 200); },
+  };
+}
+
+const secs = (x) => (Number.isFinite(Number(x)) ? `${Math.round(Number(x))} s` : "?");
+
+// The MCC power-cycle's evidence: it counts as done only because the controller said so.
+export function mccRebootLines(ev) {
+  const out = [{ kind: "ok", text: (ev && ev.summary) || "the board powered itself off and on and came back" }];
+  if (!ev || typeof ev !== "object") return out;
+  if (ev.up_after_s !== undefined) out.push({ kind: "out", text: `back after ${secs(ev.up_after_s)}` });
+  if (ev.shell_id_before) out.push({ kind: "out", text: `the same design is running (${ev.shell_id_after || ev.shell_id_before})` });
+  for (const line of [].concat(ev.down_evidence || [])) out.push({ kind: "hint", text: line });
+  if (ev.up_evidence) out.push({ kind: "hint", text: evidenceWords(ev.up_evidence) });
+  return out;
+}
+
+export function warmResetLines(ev) {
+  const out = [{ kind: "ok", text: (ev && ev.summary) || "the board restarted and came back" }];
+  if (!ev || typeof ev !== "object") return out;
+  if (ev.up_ms_before !== undefined && ev.up_ms_after !== undefined) {
+    out.push({ kind: "out", text: `its uptime started over (was ${secs(Number(ev.up_ms_before) / 1000)}, now ${secs(Number(ev.up_ms_after) / 1000)})` });
+  }
+  return out;
+}
+
+// The harness MCC facts the power read carries (null: the image has no MCC feature).
+export function mccFacts(bid) {
+  const pw = week(bid).power;
+  return pw && pw.mcc ? pw.mcc : null;
+}
+
 // --- the ladder ------------------------------------------------------------------------------
 
 export const KEEP_COLS = [["dut", "DUT state", "DUT"], ["con", "Consoles", "Consoles"], ["des", "Design", "Design"],
@@ -208,7 +290,10 @@ export function recoverSteps(bid) {
   };
   const pw = w.power;
   const plug = !!(pw && !pw.cycle_reason);
-  return [
+  const mcc = mccFacts(bid);                       // null: this image has no MCC feature
+  const loop = !!(mcc && mcc.reboot && mcc.reboot.ok);
+  const warm = !!(mcc && mcc.warm_reset && mcc.warm_reset.ok);
+  const steps = [
     { k: "reset", key: "reset_dut", panel: "reset_dut", sev: 1, t: "Reset DUT", bt: "Reset DUT", icon: "rotate-ccw",
       testid: "reset-dut", result: "reset-dut-result", arm: "arm-reset-dut",
       sh: "Pulses the DUT's reset; all else stays.", time: "~1 s",
@@ -254,6 +339,38 @@ export function recoverSteps(bid) {
       spec: powerCycleSpec(bid, pw && pw.device),
       gate: { arm: "power_cycle", holder: "Power-cycle", guard: () => offGuard(b) || guard() } },
   ];
+  if (!mcc) return numbered(steps);
+  const at = (k) => steps.findIndex((x) => x.k === k);
+  if (warm) {
+    steps.splice(at("reboot"), 0, {
+      k: "warm", key: "warm_reset", panel: "warm_reset", t: "Warm reset (like pressing the board's reset button)",
+      bt: "Warm reset", icon: "rotate-cw", testid: "warm-card", result: "warm-result", arm: "arm-warm",
+      sh: "Restarts the whole board; the FPGA stays loaded.", time: lx ? "~3 min" : "~1 min",
+      d: `Restarts the whole board like pressing its reset button, through its controller: the harness, the DUT and the network chip start again. The FPGA is not reloaded.${lx ? " Linux boots again (about 3 minutes)." : ""}`,
+      keep: K(["lost"], ["back", "drop, then reconnect"], ["lost", "restarts with the board"], ["kept"], ["kept"]),
+      spec: warmResetSpec(bid),
+      gate: { arm: "warm_reset", holder: "Warm reset", guard: () => guard() } });
+  }
+  if (loop) {
+    // The board reaches its own controller: this replaces the Debug USB reboot (works with no cable).
+    steps[at("reboot")] = {
+      k: "mccreboot", key: "mcc_reboot", panel: "mcc_reboot", t: "Power-cycle the board (through its MCC)",
+      bt: "Power-cycle", icon: "power", testid: "mcc-reboot-card", result: "mcc-reboot-result", arm: "arm-mcc-reboot",
+      sh: "Cold: the controller powers the board off and on.", time: "2-3 min",
+      d: `The board asks its own controller to power it off and on: the FPGA reloads from the config SD and ${lx ? "Linux boots again" : "the firmware starts again"} (2 to 3 minutes). It needs no Debug USB cable. ${net ? "This board netboots, so it waits in stage0 rescue until its image is pushed again." : `The design comes back as ${back}.`}`,
+      keep: K(["lost"], ["back", "drop for ~3 min, then reconnect"], ["lost", `comes back as ${back}`],
+        ["kept", "the hub lease is the hub's: this does not touch it"], ["reload", "reloaded from the config SD"]),
+      note: "Done only when the controller confirms the restart and the board returns running the same design. A board that is wedged cannot ask; then use the plug, or press PB0 at the board.",
+      spec: mccRebootSpec(bid), gate: { arm: "mcc_reboot", holder: "Power-cycle", guard: () => guard() } };
+  }
+  return numbered(steps);
+}
+
+// Severity is the step's place in this board's ladder (gentlest first); the ladder's length
+// is on each step (a board with a warm reset has six).
+function numbered(steps) {
+  steps.forEach((x, i) => { x.sev = i + 1; x.total = steps.length; });
+  return steps;
 }
 
 function KeepCell({ col, v }) {
@@ -302,10 +419,10 @@ function StepRow({ bid, s, leaseWhy }) {
     : html`<span>${s.bt}</span>`;
   return html`<li class=${`rc-row ${off ? "off" : ""} ${armed ? "armed" : ""}`} data-sev=${s.sev} data-step=${s.k}
       data-testid=${s.testid}>
-    <span class="rc-rung" title=${`Step ${s.sev} of 5`}>${s.sev}</span>
+    <span class="rc-rung" title=${`Step ${s.sev} of ${s.total}`}>${s.sev}</span>
     <div class="rc-main">
       <div class="rc-top"><span class="rc-t" title=${s.d}>${s.t}</span>
-        <span class="rc-sev" title=${`Severity ${s.sev} of 5`}>${[1, 2, 3, 4, 5].map((n) => html`<i key=${n} class=${n <= s.sev ? "on" : ""}></i>`)}</span>
+        <span class="rc-sev" title=${`Severity ${s.sev} of ${s.total}`}>${Array.from({ length: s.total }, (_, i) => i + 1).map((n) => html`<i key=${n} class=${n <= s.sev ? "on" : ""}></i>`)}</span>
         <span class="chip plain rc-time" title="Typical time"><${Icon} name="timer" />${s.time}</span></div>
       <div class="rc-d" title=${s.d}>${s.sh}</div></div>
     <div class="rc-keeps" aria-label="What this step keeps">${KEEP_COLS.map(([c, lbl]) => html`<${KeepCell} key=${c} col=${lbl} v=${s.keep[c]} />`)}</div>
@@ -385,6 +502,6 @@ export function recoverStatus(bid) {
   if (leaseWhy) return ["watch only: no lease", "held", leaseWhy];
   const can = steps.filter((s) => !stepWhy(bid, s)).map((s) => s.sev);
   const guard = cardGuard(bid);
-  return [`steps ${rangeText(can)} of 5 here`, null, guard ? `Restart, reboot and power-cycle wait: ${guard}` : "The steps this board can do now"];
+  return [`steps ${rangeText(can)} of ${recoverSteps(bid).length} here`, null, guard ? `Restart, reboot and power-cycle wait: ${guard}` : "The steps this board can do now"];
 }
 
