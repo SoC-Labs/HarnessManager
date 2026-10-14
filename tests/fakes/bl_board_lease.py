@@ -100,6 +100,8 @@ class BoardLeaseServer:
         if fn is None:
             return _no("invalid act (show history acquire heartbeat release request respond "
                        "cancel revoke mode)", "invalid")
+        if "lease" in request and not isinstance(request["lease"], str):
+            return _no("bad args: lease must be a string", "bad_args")
         if self.access_busy and act not in ("show", "history"):
             return _no("lease refused: board access in progress at the panel", "busy_access")
         return fn(request)
@@ -170,7 +172,7 @@ class BoardLeaseServer:
         queue = [{"id": w["id"], "who": w["who"], "msg": w["msg"], "age_s": int(self.now - w["at"])}
                  for w in self.queue]
         return {"ok": True, "op": "lease", "act": "show", "mode": self.mode,
-                "persistent": self.persistent, "holder": self._holder_view(request),
+                "persistent": self.persistent, "owner": bool(self._claimed()), "holder": self._holder_view(request),
                 "queue": queue, "local_hold_s": max(0, int(self.local_hold_until - self.now)),
                 "reclaim_s": 0}
 
@@ -305,12 +307,12 @@ class BoardLeaseServer:
             return _no("lease revoke: confirm must be the board's label", "invalid")
         head = self.queue[0] if self.queue else None
         if head is None or not head.get("req_at"):
-            return _no("lease revoke: not the holder", "not_holder")
+            return _no("lease revoke: no unanswered request", "busy")
         left = int(REQUEST_WINDOW_S - (self.now - head["req_at"]))
         if left > 0:
             return _no(f"lease revoke: the holder has {left} s to answer", "busy")
         if self.holder is not None:
-            self._event("revoke", self.holder["who"])
+            self._event("revoke", head["who"], f"from {self.holder['who']}")   # actor, then info
             self._holder_goes()
         return {"ok": True, "op": "lease", "act": "revoke"}
 
@@ -324,14 +326,15 @@ class BoardLeaseServer:
                 return _no(f"lease mode: ended at the panel "
                            f"{int(LOCAL_HOLD_S - (self.local_hold_until - self.now))} s ago "
                            f"(wait {int(self.local_hold_until - self.now)} s)", "local_hold")
+            ttl = int(request.get("ttl_s") or TTL_S)
+            if not 300 <= ttl <= 14400:
+                return _no("invalid ttl_s argument", "invalid")
             self.mode = "single_user"
-            self._event("mode_on", "owner")
+            self._event("mode_on", "owner#0000")
             who = "owner#0000"
-            if self.holder is not None and self.holder["who"] != who:
-                self._event("revoke", self.holder["who"])
-            reply = {**self._grant(who, "", TTL_S), "act": "mode"}
+            reply = {**self._grant(who, "", ttl), "act": "mode"}
             return {**self._show({"lease": reply["token"]}), "act": "mode",
-                    "token": reply["token"], "expires_in_s": TTL_S}
+                    "token": reply["token"], "expires_in_s": ttl}
         if want == "open":
             if not (owner or self._is_holder(request)):
                 return _no("lease mode: not the holder", "not_holder")

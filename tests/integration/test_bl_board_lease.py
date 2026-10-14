@@ -358,7 +358,9 @@ def test_force_release_needs_the_boards_label_and_an_unanswered_request(rig_of):
     sent = srv.acts[-1][1]
     assert sent["confirm"] == "mps3-01" and "reason" not in sent and "confirm_board" not in sent
     taken = BL.taken_from_history(client.lease_history(), OTHER)
-    assert taken is not None and taken["at"]
+    assert taken is not None and taken["at"] and taken["by"] == ME   # who = the head that forced it
+    ev = [e for e in client.lease_history() if e["ev"] == "revoke"][-1]
+    assert ev["prior_holder"] == OTHER and ev["by"] == ME            # info = "from <holder>"
     client.name = "wrong"
     with pytest.raises(HeldError) as exc:
         client.lease_revoke("x")
@@ -539,3 +541,71 @@ def test_lease_for_a_candidate_beside_hub_for(monkeypatch):
     hub = object()
     monkeypatch.setattr(pack, "hub_for", lambda c: hub)
     assert pack.lease_for(cand) is hub
+
+
+# --- contract follow-ups: ttl on mode, owner, stable who, cancel without a queue id ---------------
+
+
+def test_mode_on_sends_hms_board_ttl_and_the_grant_uses_it(rig_of):
+    rig, srv, client = ours(rig_of)
+    client.set_ttl(900)
+    res = client.set_mode(True, take=True)
+    assert srv.acts[-1][1]["ttl_s"] == 900 and res.expires_at == BL.iso(NOW + 900)
+    client.set_mode(False)
+    assert "ttl_s" not in srv.acts[-1][1]
+    client.set_ttl(100)                                        # clamped to the wire's 300 minimum
+    client.set_mode(True, take=True)
+    assert srv.acts[-1][1]["ttl_s"] == 300
+
+
+def test_owner_maps_to_can_change_for_on_and_off(rig_of):
+    rig, srv, client = ours(rig_of)
+    assert client.mode().can_change is True                    # owner: may turn it on
+    srv._claimed = lambda: False
+    off_limits = client.mode()
+    assert off_limits.can_change is False and "owner" in off_limits.change_reason
+    srv._claimed = lambda: True
+    client.set_mode(True, take=True)
+    srv._claimed = lambda: False
+    assert client.mode().can_change is True                    # the holder (you) may turn it off
+    other = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW)
+    assert other.mode().can_change is False
+    assert BL.BoardLeaseClient._mode_of({"mode": "open"}).can_change is True   # no `owner` key
+
+
+def test_every_acquire_poll_sends_the_same_who(rig_of):
+    rig, srv, client = ours(rig_of)
+    srv.mode = "single_user"
+    BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW
+                        ).lease_acquire(OTHER, ttl=300)
+    for _ in range(2):                                         # two CLI-style fresh clients
+        fresh = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW)
+        with pytest.raises(KeyboardInterrupt):
+            fresh.lease_acquire(ME, ttl=300, sleep=lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    assert [w["who"] for w in srv.queue] == [ME]               # one place, kept
+    fresh = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW)
+    assert fresh.lease_cancel(ME) is True and srv.queue == []  # found by who, no queue id kept
+
+
+def test_lease_held_for_our_own_who_keeps_the_stored_token(rig_of):
+    rig, srv, client = ours(rig_of)
+    srv.mode = "single_user"
+    grant, _ = client.lease_acquire(ME, ttl=600)
+    again, expires = client.lease_acquire(ME, ttl=600)         # the board: lease_held, no token
+    assert again.token == grant.token and client.current_token() == grant.token
+    assert expires == BL.iso(NOW + 600)
+    assert srv.op({"op": "lease", "act": "acquire", "who": ME})["code"] == "lease_held"
+
+
+def test_lease_held_for_our_own_who_without_a_key_says_so_and_does_not_loop(rig_of):
+    rig, srv, client = ours(rig_of)
+    srv.mode = "single_user"
+    client.lease_acquire(ME, ttl=600)
+    lost = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="mps3-01", who=ME,
+                               clock=lambda: NOW, sleep=lambda s: None)   # wiped state dir
+    SH.set_lease_token_source(rig.session.shell.gate_key, None)
+    n = len([a for a, _ in srv.acts if a == "acquire"])
+    with pytest.raises(ActionFailedError) as exc:
+        lost.lease_acquire(ME, ttl=600)
+    assert "no longer has its key" in exc.value.message and "about 10 min" in exc.value.message
+    assert len([a for a, _ in srv.acts if a == "acquire"]) == n + 1       # one try, no loop
