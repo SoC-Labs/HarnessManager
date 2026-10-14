@@ -158,6 +158,9 @@ STATE_MINE = "mine"
 STATE_OTHER = "other"
 STATE_UNCLAIMED = "unclaimed"
 STATE_UNKNOWN = "unknown"
+LOST_CLAIM_WORDS = ("The board lost its claim when it restarted (it has no card to keep it). "
+                    "Claim it again from this PC.")
+LOST_CLAIM_HINT = "`harness-manager board claim TARGET`, or Claim on the Access page"
 
 #: How long a LAN identify answer is reused (``info`` asks on every read).
 LAN_TTL_S = 30.0
@@ -1149,6 +1152,13 @@ class Mps3Claim:
             state = STATE_MINE
         else:
             state = STATE_OTHER
+        # CLAIMROUTE: a board with no card keeps its claim on tmpfs; a restart drops it. The
+        # state stays "unclaimed" (the other screens read it); ``lost`` is the extra word.
+        # Never claimed again from here by itself: re-claiming is the person's decision.
+        lost = None
+        if obs.claimed is False and mine_on_record and rec.get("key_fp"):
+            lost = {"message": LOST_CLAIM_WORDS, "hint": LOST_CLAIM_HINT}
+            notes.append(LOST_CLAIM_WORDS)
         if obs.claimed is not None and obs.error:
             notes.append(obs.error)          # a last check shown because the hub did not answer
         if match is False and seen_at:
@@ -1189,6 +1199,7 @@ class Mps3Claim:
         return {
             "state": state,
             "claimed": claimed,
+            "lost": lost,
             # seen_before (additive, SMALL-4): the reported key changed BACK to one this Harness
             # Manager pinned before: when it last was (ISO); null for a key never seen
             "host_key": {"reported": reported or None, "pinned": pinned or None, "match": match,

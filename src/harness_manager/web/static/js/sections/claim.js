@@ -206,6 +206,7 @@ export function ClaimCard({ bid }) {
           ${why ? html`<span class="small muted" data-testid="reason-access-repin">${why}</span>` : null}</div>` : null}
       </div>` : null}
       ${c.state === "unclaimed" ? html`<${Reason} level="warn" text="Not claimed: anyone with the image's default key can log in." />` : null}
+      ${c.lost ? html`<${Reason} level="warn" text=${c.lost.message} />` : null}
       ${c.state === "mine" && hasNamePrefill(bid) ? html`<div class="bt-foot" data-testid="claim-then-name">
         <${Reason} level="ok" text="Claimed. Next, name this board: the wizard's proposal is ready." />
         <button type="button" class="btn sm primary" data-action="access-name-after-claim"
