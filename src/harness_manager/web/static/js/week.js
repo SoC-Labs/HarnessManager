@@ -7,6 +7,7 @@
 
 import { call, routeMissing, toApiError } from "./api.js";
 import { clock } from "./format.js";
+import { LEASE_WORDS } from "./lease_words.js";
 import { refreshState } from "./viewer.js";
 import {
   bgOpts, boardState, changed, heldBack, log, onBoardEvent, onBoardOpened, onJobEnded, S,
@@ -132,13 +133,21 @@ export async function loadHub(bid) {
   }
   const lease = lr.error ? null : lr.data.data;
   const tunnel = tr.error ? null : tr.data.data.tunnel;
-  if ((!lease || !lease.hub) && !tunnel) {
-    w.hub = null;                // not behind a hub
+  // A board's own lease (`server.kind` "board"): only while single-user mode is on is there a
+  // lease; shared (mode off) reads as "no lease", as a desk board always did.
+  const server = (lease && lease.server) || null;
+  const boardShared = !!server && server.kind === "board" && !!lease.mode && lease.mode.single_user === false;
+  const hasServer = !!server && !boardShared;
+  if (!(server && server.kind === "hub")) loadLeaseMode(bid);
+  if (boardShared && lease.taken) w.takenBoard = { ...lease.taken };
+  if (((!lease || !lease.hub) && !hasServer) && !tunnel) {
+    w.hub = null;                // no lease server: not behind a hub, board shared
   } else {
     // docs/LEASE_REQUESTS.md adds queue, request (mine, outgoing), incoming (for my lease)
     // and taken (the last force release of my lease); an older daemon has none of them.
     const d = lease || {};
-    w.hub = { host: d.hub || (tunnel && tunnel.host) || "", lease: lease ? d.lease : null, tunnel,
+    w.hub = { host: d.hub || (hasServer && server.host) || (tunnel && tunnel.host) || "",
+      server: hasServer ? server : null, mode: d.mode || null, lease: lease ? d.lease : null, tunnel,
       // LEASE-UI: a lease read that failed is not a free lease (REVIEW-W5 2: not known is not free)
       leaseError: lr.error ? `${lr.error.errName}: ${lr.error.message}` : "",
       queue: Array.isArray(d.queue) ? d.queue : [], request: d.request || null,
@@ -161,6 +170,36 @@ export async function loadHub(bid) {
     try { fn(bid, w.hub); } catch (e) { /* a hook never breaks the read */ }
   }
   changed();
+}
+
+// Board > Access: GET /boards/{bid}/lease/mode (single-user mode). An older daemon has no route:
+// the card then does not show.
+export async function loadLeaseMode(bid) {
+  const w = week(bid);
+  if (w.leaseModeUnsupported || w.leaseModeLoading) return;
+  w.leaseModeLoading = true;
+  try {
+    const r = await timed("lease mode", () => call("leaseMode", { bid }));
+    if (r.error) {
+      if (routeMissing(r.error)) w.leaseModeUnsupported = true;
+      else w.leaseModeError = `${r.error.errName}: ${r.error.message}`;
+    } else {
+      w.leaseMode = r.data.data;
+      w.leaseModeError = "";
+    }
+  } finally {
+    w.leaseModeLoading = false;
+    changed();
+  }
+}
+
+// What a lease text calls the lease server: "the hub", or "the board" for a desk board in
+// single-user mode. `x` is a board id, or leaseWho's answer.
+export function serverWord(x) {
+  const hub = typeof x === "string"
+    ? (S.board[x] && S.board[x].week && S.board[x].week.hub)
+    : (x && x.hub);
+  return hub && hub.server && hub.server.kind === "board" ? LEASE_WORDS.serverBoard : LEASE_WORDS.serverHub;
 }
 
 // lease.js follows every read of the lease (the victim banner, the countdowns).
@@ -210,10 +249,11 @@ export function leaseWho(bid) {
 // here: the daemon's gates say the same (services/lease.py held_here).
 export function holderOnly(bid, what) {
   const who = leaseWho(bid);
+  const sw = serverWord(bid);
   switch (who.state) {
     case "none": case "here": return "";
-    case "unread": return "reading the board's hub lease first";
-    case "unknown": return `${what} is for the lease holder only, and the hub lease could not be read (not known is not free)`;
+    case "unread": return `reading the board's ${sw === LEASE_WORDS.serverHub ? "hub " : ""}lease first`;
+    case "unknown": return `${what} is for the lease holder only, and the lease could not be read (not known is not free)`;
     case "free": return `${what} is for the lease holder only, and nobody holds this board's lease: acquire it first (header)`;
     case "elsewhere": return `${what} is for the lease holder only: ${who.holder} holds this board in another session, not this Harness Manager`;
     default: return `${what} is for the lease holder only: ${who.holder || "someone else"} holds this board`;
@@ -229,10 +269,10 @@ export function leaseHere(lease) {
 
 // LEASE-FRESH: the quiet note for a lease the service carried over a failed hub read ("" for a
 // fresh one): when the hub last confirmed it, and that the page reads it again.
-export function staleNote(stale) {
+export function staleNote(stale, word = LEASE_WORDS.serverHub) {
   if (!stale) return "";
   const at = epochOf(stale.confirmed_at);
-  return `last confirmed ${at === null ? "a moment ago" : clock(at)}; the hub didn't answer the last read, reading again`;
+  return `last confirmed ${at === null ? "a moment ago" : clock(at)}; ${word} didn't answer the last read, reading again`;
 }
 
 // LEASE-BOARD: what lease text calls the leased thing: fpgahub's physical board (mps3_01)
@@ -251,7 +291,7 @@ export function leaseTargetNote(who) {
 // "mps3_01 on mapstone-dev (target mps3_01_pl)"; "mps3_01_pl on mapstone-dev" with no board.
 export function leaseWhere(who) {
   const note = leaseTargetNote(who);
-  return `${leaseName(who) || "the board's target"} on ${(who && who.host) || "the hub"}${note ? ` (target ${note})` : ""}`;
+  return `${leaseName(who) || "the board's target"} on ${(who && who.host) || serverWord(who)}${note ? ` (target ${note})` : ""}`;
 }
 
 // expires_at: fpgahub's ISO 8601 ("2026-09-25T12:00:00+00:00"), or epoch seconds.
