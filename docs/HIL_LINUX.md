@@ -966,6 +966,66 @@ SD mounted on this machine; the hub door needs FH-b first.
 
 ---
 
+## Single-user mode on the board (manual, about 40 min, board 1)
+
+Not part of the timed run above and not in the unattended plans: it needs two PCs, a person at
+the board, and a closed laptop. Run it in the Fri 16 Oct silicon session on board 1 (it has
+the card; board 2 has none, see the last step). It changes the board's lease mode only: no card
+or slot write.
+
+**You need:** PC-1 and PC-2, each with its own Harness Manager and its **own SSH key**; PC-1
+has claimed board 1, and PC-2's key is added to the board (Board > Access > Board keys). A
+third key that is NOT on the board for the refusal step (a throw-away `ssh-keygen`). Write the
+evidence to `$EV/su_*.txt` as in section 0.1.
+
+1. **PC-1: check the board is free and claimed.** `harness-manager board claim-status $B`.
+   Expect: "claimed by you". Both PCs: Board > Access shows **Who can use this board** as
+   **Shared**.
+2. **PC-1: switch on.** Board > Access > Who can use this board > **One person at a time**,
+   then **Switch and take the lease**. Expect: "`<board>` is now one person at a time, and you
+   hold the lease." and the badge **Yours**. `harness-manager lease mode $B` prints the mode
+   and who switched it on.
+3. **PC-2: it sees the mode.** Expect: "One person at a time, switched on by `<PC-1 key owner>`",
+   the badge **Held by …**, and Program, Reset and the debug buttons greyed. The switch to
+   Shared is greyed too ("Only the person who claimed the board, or whoever holds the lease,
+   can switch this off."). Reading (Overview, Info) still works.
+4. **PC-2: a change is refused.** `harness-manager reset $B`. Expect: a refusal that names
+   the lease, not a timeout; the board does not reset (watch the panel).
+5. **PC-2: Request, then Keep.** Press **Request board** with a message. Expect on PC-1 within
+   10 s: a prompt on every page with the message. On PC-1 choose **Keep for 5 min**. Expect on
+   PC-2: the answer and the new time.
+6. **PC-2: force after the window.** When the keep runs out and 2 minutes pass, **Force give
+   back** appears on PC-2 and is not enabled until the board's name is typed. Type it. Expect:
+   PC-2 holds the lease; PC-1 shows the "taken" banner naming PC-2. (Do not force before the
+   deadline: it must be refused with the time left.)
+7. **PC-2: Give back lease**, then PC-1 **Take lease**. Expect: a clean hand-over, no banner.
+8. **Lapse: close PC-1's laptop** with PC-1 holding the lease and PC-2 queued (Request board
+   first). Expect: within the lease length (15 min, or set `lease.board_ttl_min 3` first) the
+   lease lapses and PC-2 gets the board by itself.
+9. **Touchscreen break.** PC-2 holds the lease. A person at the board uses the touchscreen to
+   switch single-user mode off. Expect: PC-2's banner "`<board>`'s lease was ended at the
+   board at `<time>`: someone switched off single-user mode on the touchscreen. The board is
+   shared again."; the mode reads Shared on both PCs; switching on from PC-1 waits and says
+   "Switched off at the board's touchscreen; it can be switched on again in `<n>` min."
+10. **Reboot reclaim.** Switch on again from PC-1 after the wait. Then `harness-manager mcc $B
+    reboot --yes` (the MCC REBOOT of section D) and wait for the board (about 190 s).
+    Expect: the mode is still **One person at a time**; PC-1 reclaims the lease within 5
+    minutes without being asked; PC-2 cannot take it in that time.
+11. **Claimed-board refusals for a keyless peer.** From a PC or a shell whose key is NOT on the
+    board, send a changing verb straight to the control port, for example `printf
+    'reset\n' | nc $B 6900`. Expect: the line `… locked: board claimed (use ssh)`, code
+    `locked`, and no change. Read verbs (`info`) still answer. Then, from PC-1, the same
+    change works without you doing anything extra: HM sends it through the claim connection.
+12. **Switch off and tidy.** PC-1: Switch to shared. Expect: "`<board>` is shared again." on
+    both PCs. Set `lease.board_ttl_min` back if you changed it.
+13. **Board 2 (no card), 5 min, only if it is free.** Switch on, power-cycle the board, expect
+    **Shared** after boot and, on the PC that claimed it, the words "The board lost its claim
+    when it restarted (it has no card to keep it). Claim it again from this PC." on any
+    changing action.
+
+If a step fails, keep the evidence file, switch the board back to Shared (touchscreen, if the
+app cannot), and write the step number and the first refused line in the report.
+
 ## Z. Close-out (5 min)
 
 **Z1. Put the card's power-on default back to C2's line.** **WRITES** the user microSD. It asks;
