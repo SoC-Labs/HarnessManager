@@ -1019,10 +1019,12 @@ evidence to `$EV/su_*.txt` as in section 0.1.
     change works without you doing anything extra: HM sends it through the claim connection.
 12. **Switch off and tidy.** PC-1: Switch to shared. Expect: "`<board>` is shared again." on
     both PCs. Set `lease.board_ttl_min` back if you changed it.
-13. **Board 2 (no card), 5 min, only if it is free.** Switch on, power-cycle the board, expect
-    **Shared** after boot and, on the PC that claimed it, the words "The board lost its claim
-    when it restarted (it has no card to keep it). Claim it again from this PC." on any
-    changing action.
+13. **A card-less board, 5 min, only if one is free (never board 2: it is the workshop
+    demo).** Switch on, restart the board, expect **Shared** after boot and, on the PC that
+    claimed it, the words "The board lost its claim when it restarted (it has no card to keep
+    it). Re-claim it from the board's serial console, then adopt it here (Board → Access →
+    Adopt this board)." on any changing action, with no retry through SSH. Then
+    `mps3-reclaim KEYFILE` on the serial console and **Adopt this board**.
 
 If a step fails, keep the evidence file, switch the board back to Shared (touchscreen, if the
 app cannot), and write the step number and the first refused line in the report.
