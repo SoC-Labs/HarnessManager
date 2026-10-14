@@ -115,3 +115,11 @@ def test_only_vendored_icons_in_the_new_code():
     claim = read("sections", "claim.js").split("Who can use this board", 1)[1]
     for name in set(re.findall(r'icon="([a-z0-9-]+)"', claim)):
         assert f'"{name}"' in icons or f"{name}:" in icons or f"'{name}'" in icons, name
+
+
+def test_keep_is_binding_words_and_the_holder_countdown_are_wired():
+    block = words_block(read("lease_words.js"))
+    assert has_string(block, "keepingFor: (min, who) => `Keeping it for ${min} min (asked by ${who})`")
+    assert has_string(block, 'requestDefault: "may I use the board?"')
+    assert "LEASE_WORDS.keepingFor(" in read("lease.js") and 'data-testid="keeping-for"' in read("lease.js")
+    assert not has_string(words_block("export const LEASE_WORDS = {}"), "keepingFor")      # negative twin

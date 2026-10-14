@@ -30,8 +30,8 @@ from tests.fakes.claimed_lock import TRUSTED
 from tests.integration.test_claimed_lock import lab  # noqa: F401  (the fixture)
 
 HUB_SIDE = "127.0.0.1"          # the hub tunnel / this PC: not the board itself
-ME = "harness-manager-david@pc1"
-OTHER = "harness-manager-bob@pc2"
+ME = "david@pc1"             # a board `who` is <= 24 chars (board_who)
+OTHER = "bob@pc2"
 NOW = 2_000_000_000.0
 
 
@@ -245,7 +245,7 @@ def test_acquire_polls_while_queued_and_logs_the_position(rig_of):
     assert grant.token == srv.holder["token"]
     acquires = [r for a, r in srv.acts if a == "acquire" and r.get("who") == ME]
     assert len(acquires) == 3 and all("token" not in r for r in acquires)   # known by who
-    assert all(r["app"] == "Harness Manager" and r["ttl_s"] == 600 for r in acquires)
+    assert all(r["app"] == "harness-mgr" and len(r["app"]) <= 12 and r["ttl_s"] == 600 for r in acquires)
 
 
 def test_acquire_that_waits_too_long_leaves_the_queue_and_says_so(rig_of):
@@ -609,3 +609,75 @@ def test_lease_held_for_our_own_who_without_a_key_says_so_and_does_not_loop(rig_
         lost.lease_acquire(ME, ttl=600)
     assert "no longer has its key" in exc.value.message and "about 10 min" in exc.value.message
     assert len([a for a, _ in srv.acts if a == "acquire"]) == n + 1       # one try, no loop
+
+
+def test_board_who_is_at_most_24_stable_and_the_acquire_sends_it(rig_of, monkeypatch):
+    long_name = "harness-manager-averyveryverylongusername@a-rather-long-hostname-01"
+    who = BL.board_who(long_name)
+    assert len(who) <= BL.WHO_MAX == 24 and who == BL.board_who(long_name) and who.isprintable()
+    assert who == "averyveryverylongusername@a-rather-long-hostname-01"[:24]   # no prefix, cut to 24
+    assert BL.board_who("harness-manager-bob@pc2") == "bob@pc2"
+    rig, srv, client = ours(rig_of)
+    srv.mode = "single_user"
+    grant, _ = client.lease_acquire(long_name, ttl=600)
+    assert srv.holder["who"] == who and grant.token
+    # the CLI-style repeat (same name, fresh client) is `lease_held`: already ours, token stored
+    assert client.lease_acquire(long_name, ttl=600)[0].token == grant.token
+
+
+def test_keep_is_binding_a_heartbeat_returns_the_shorter_expiry_without_error(rig_of):
+    rig, srv, client = ours(rig_of)
+    srv.mode = "single_user"
+    grant, _ = client.lease_acquire(ME, ttl=3600)
+    bob = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW)
+    bob.put_request(ServiceRequestNote("n", OTHER, "bob", "pc2", "", "", ""))
+    [note] = client.list_requests()
+    client.put_answer(BL.AnswerNote(note.id, "keep", 10, "", ""))
+    assert client.lease_heartbeat(grant.token, ME) == BL.iso(NOW + 600)    # not now + 3600
+
+
+def test_an_empty_request_message_gets_the_default_and_a_second_request_is_the_same_id(rig_of):
+    rig, srv, client = ours(rig_of)
+    srv.mode = "single_user"
+    client.lease_acquire(ME, ttl=600)
+    bob = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW)
+    bob.put_request(ServiceRequestNote("n1", OTHER, "bob", "pc2", "", "", ""))
+    bob.put_request(ServiceRequestNote("n2", OTHER, "bob", "pc2", "again", "", ""))
+    [note] = client.list_requests()
+    assert note.message == "may I use the board?" and len(srv.queue) == 1
+    bob.delete_request("n1")
+    bob.delete_request("n2")                                     # already gone: not an error
+    assert srv.queue == []
+
+
+def test_mode_on_when_on_and_free_is_granted_and_when_held_is_plain_words(rig_of):
+    rig, srv, client = ours(rig_of)
+    srv.mode = "single_user"
+    assert client.set_mode(True, take=True).granted is True       # on, nobody holds: granted
+    other = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", who=OTHER,
+                                clock=lambda: NOW)
+    srv.holder["who"] = "someone#1234"                            # held by another person
+    with pytest.raises(HeldError) as exc:
+        other.set_mode(True, take=True)
+    assert exc.value.code_text == "lease_held" and "already on" in exc.value.message
+
+
+def test_a_lapsed_reserved_head_is_told_in_plain_words(rig_of):
+    rig, srv, client = ours(rig_of)
+    srv.mode = "single_user"
+    first, _ = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW
+                                   ).lease_acquire(OTHER, ttl=600)
+    naps: list[float] = []
+
+    def nap(seconds: float) -> None:
+        naps.append(seconds)
+        if len(naps) == 1:
+            srv.op({"op": "lease", "act": "acquire", "who": "carol@pc3", "ttl_s": 300})  # behind us
+            srv.op({"op": "lease", "act": "release", "lease": first.token})
+            srv.tick(121)                                         # we were next and did not take it
+
+    with pytest.raises(ActionFailedError) as exc:
+        client.lease_acquire(ME, ttl=600, sleep=nap)
+    assert exc.value.message == BL.LAPSED_WORDS and [w["who"] for w in srv.queue] == ["carol@pc3"]
+    ev = [e for e in client.lease_history() if e["ev"] == "cancel" and e["reason"] == "lapsed"][-1]
+    assert ev["event"] == "lease.lapsed" and ev["holder"] == BL.board_who(ME)

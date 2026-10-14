@@ -51,6 +51,11 @@ export const LEASE_WORDS = {
   ovOneLink: "One person at a time…",
   ovSourceBoard: "Source: the board's own lease (single-user mode)",
 
+  // Keep is binding on a board: heartbeats cannot extend past it.
+  keepingFor: (min, who) => `Keeping it for ${min} min (asked by ${who})`,
+  requestDefault: "may I use the board?",
+  lapsed: "You were next but did not take it in time; ask again.",
+
   // The banner when someone switched it off at the touchscreen.
   takenAtBoard: (board, at) => `${board}'s lease was ended at the board${at ? ` at ${at}` : ""}: someone switched off single-user mode on the touchscreen. The board is shared again.`,
   takenAtBoardSub: "You can keep using the board, now at the same time as others.",

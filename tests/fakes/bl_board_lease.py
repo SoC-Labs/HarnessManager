@@ -32,6 +32,7 @@ RECLAIM_S = 300
 QUEUE_MAX = 4
 GATED_VERBS = tuple(V22_LOCKED_VERBS) + ("commit",)
 HISTORY_KEEP = 64
+WHO_MAX = 24
 
 
 def locked_reply(verb: str) -> dict[str, Any]:
@@ -70,7 +71,21 @@ class BoardLeaseServer:
         self.now += seconds
         self._expire()
 
+    def _lapse(self) -> None:
+        """R5: a reserved head that did not take the board within 120 s is DROPPED (event cancel,
+        info "lapsed"); the next head gets a fresh 120 s."""
+        while self.holder is None and self.queue and self.reserve_start \
+                and self.now - self.reserve_start >= RESERVE_S:
+            gone = self.queue.pop(0)
+            self._event("cancel", gone["who"], "lapsed")
+            self.reserve_start += RESERVE_S
+            if self.queue:
+                self._event("reserve", "", self.queue[0]["who"])
+        if not self.queue:
+            self.reserve_start = 0.0
+
     def _expire(self) -> None:
+        self._lapse()
         if self.holder and self.holder["expires"] <= self.now:
             self._event("expire", self.holder["who"])
             self._holder_goes()
@@ -84,7 +99,7 @@ class BoardLeaseServer:
         self.holder = None
         if self.queue:
             self.reserve_start = self.now
-            self._event("reserve", self.queue[0]["who"])
+            self._event("reserve", "", self.queue[0]["who"])
 
     def _fresh_id(self) -> str:
         self._n += 1
@@ -189,8 +204,8 @@ class BoardLeaseServer:
 
     def _grant(self, who: str, app: str, ttl: int) -> dict[str, Any]:
         token = secrets.token_hex(16)
-        self.holder = {"who": who, "app": app, "token": token, "at": self.now,
-                       "expires": self.now + ttl, "idle_at": self.now}
+        self.holder = {"who": who, "app": app, "token": token, "at": self.now, "ttl": ttl,
+                       "expires": self.now + ttl, "idle_at": self.now, "keep_until": 0.0}
         self.reserve_start = 0.0
         self._event("grant", who)
         return {"ok": True, "op": "lease", "act": "acquire", "granted": True, "token": token,
@@ -202,12 +217,12 @@ class BoardLeaseServer:
 
     def _act_acquire(self, request: dict[str, Any]) -> dict[str, Any]:
         who = str(request.get("who") or "")
-        if not who:
+        if not who or len(who) > WHO_MAX:
             return _no("invalid who argument", "invalid")
         ttl = int(request.get("ttl_s") or TTL_S)
         if not 300 <= ttl <= 14400:
             return _no("invalid ttl_s argument", "invalid")
-        if self.holder is not None and self.holder["who"] == who:
+        if self.holder is not None and (self.holder["who"] == who or self._is_holder(request)):
             return _no("lease already held by you", "lease_held")
         mine = next((w for w in self.queue if w["who"] == who), None)
         if self.holder is None and self._may_take(mine):
@@ -227,8 +242,7 @@ class BoardLeaseServer:
         to the next waiter; once every waiter has had its 120 s anybody may take it."""
         if not self.queue or not self.reserve_start:
             return True
-        idx = int((self.now - self.reserve_start) // RESERVE_S)
-        return idx >= len(self.queue) or mine is self.queue[idx]
+        return mine is self.queue[0]
 
     def _holds(self, request: dict[str, Any], act: str) -> dict[str, Any] | None:
         """None when the request's top-level token is the holder's, else the refusal."""
@@ -243,10 +257,15 @@ class BoardLeaseServer:
         bad = self._holds(request, "heartbeat")
         if bad:
             return bad
-        ttl = int(request.get("ttl_s") or TTL_S)
+        ttl = int(request.get("ttl_s") or self.holder["ttl"])   # type: ignore[index]  # R10
         if not 300 <= ttl <= 14400:
             return _no("invalid ttl_s argument", "invalid")
-        self.holder["expires"] = self.now + ttl            # type: ignore[index]
+        self.holder["ttl"] = ttl                           # type: ignore[index]
+        deadline = self.now + ttl
+        keep = self.holder["keep_until"]                   # type: ignore[index]
+        if keep > self.now:                                # R9: a Keep is binding
+            deadline = min(deadline, keep)
+        self.holder["expires"] = deadline                  # type: ignore[index]
         self.holder["idle_at"] = self.now                  # type: ignore[index]
         self._event("renew", self.holder["who"])           # type: ignore[index]
         return self._show(request)
@@ -262,15 +281,21 @@ class BoardLeaseServer:
     def _act_request(self, request: dict[str, Any]) -> dict[str, Any]:
         who = str(request.get("who") or "")
         msg = str(request.get("msg") or "")
-        if not who or len(msg) > 48:
-            return _no("invalid msg argument" if who else "invalid who argument", "invalid")
+        if not who or len(who) > WHO_MAX:
+            return _no("invalid who argument", "invalid")
+        if not msg or len(msg) > 48:
+            return _no("invalid msg argument", "invalid")
+        if self.holder is not None and self.holder["who"] == who:
+            return _no("lease already held by you", "lease_held")
         w = next((x for x in self.queue if x["who"] == who), None)
+        if w is not None and w.get("req_at"):                # R6: the open request, unchanged
+            return {"ok": True, "op": "lease", "act": "request", "id": w["id"]}
         if w is None:
             if len(self.queue) >= QUEUE_MAX:
                 return _no("lease queue full (4 waiting)", "queue_full")
             w = {"id": self._fresh_id(), "who": who, "msg": "", "at": self.now, "req_at": 0.0}
             self.queue.append(w)
-        w["msg"], w["req_at"] = msg or "(asking)", self.now
+        w["msg"], w["req_at"] = msg, self.now
         self._event("request", who)
         return {"ok": True, "op": "lease", "act": "request", "id": w["id"]}
 
@@ -292,10 +317,15 @@ class BoardLeaseServer:
         self._event("keep", who, f"keep {minutes}")
         w["msg"], w["req_at"] = "", 0.0
         self.holder["expires"] = self.now + minutes * 60    # type: ignore[index]
+        self.holder["keep_until"] = self.holder["expires"]  # type: ignore[index]  # R9
         return {"ok": True, "op": "lease", "act": "respond", "expires_in_s": minutes * 60}
 
     def _act_cancel(self, request: dict[str, Any]) -> dict[str, Any]:
-        w = next((x for x in self.queue if x["id"] == request.get("id")), None)
+        who = str(request.get("who") or "")
+        if len(who) > WHO_MAX:
+            return _no("invalid who argument", "invalid")
+        w = next((x for x in self.queue if x["id"] == request.get("id")
+                  and (not who or x["who"] == who)), None)
         if w is None:
             return _no("invalid id: no such request", "invalid")
         self.queue.remove(w)
@@ -329,9 +359,16 @@ class BoardLeaseServer:
             ttl = int(request.get("ttl_s") or TTL_S)
             if not 300 <= ttl <= 14400:
                 return _no("invalid ttl_s argument", "invalid")
-            self.mode = "single_user"
-            self._event("mode_on", "owner#0000")
             who = "owner#0000"
+            if self.mode == "single_user" and self.holder is not None \
+                    and not self._is_holder(request) and self.holder["who"] != who:
+                return _no("lease mode: single-user is already on", "lease_held")   # R7
+            if self.mode == "single_user" and self.holder is not None:
+                return {**self._show(request), "act": "mode", "token": self.holder["token"],
+                        "expires_in_s": int(self.holder["expires"] - self.now)}
+            if self.mode != "single_user":
+                self._event("mode_on", "owner#0000")
+            self.mode = "single_user"
             reply = {**self._grant(who, "", ttl), "act": "mode"}
             return {**self._show({"lease": reply["token"]}), "act": "mode",
                     "token": reply["token"], "expires_in_s": ttl}
