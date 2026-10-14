@@ -11,14 +11,14 @@ Do not edit anything here by hand. Rebuild it with `scripts/vendor_pyverify.sh` 
 | Field | Value |
 |---|---|
 | Wheel | `mps3_pyverify-0.1.0-py3-none-any.whl` |
-| sha256 | `cbbcc3e15e63ef249feb03f705abd79f0b82f1138271d019ef05766a846d9a76` |
+| sha256 | `15cb0e4c7d1cdf8190bfa98c81431cef2c7e9300e7e63d6b58e818aabf381337` |
 | Built from | `git@github.com:SoC-Labs/MPS3-NanoSoC-Verification-Platform-Dev.git` |
-| Platform commit | `16a9aad600ab0b7951ac9ea844f3087ec750d239` (2026-10-14T10:49:48+01:00) |
-| Status | DEV ONLY: rc2 SEC 16a9aad6; re-vendor from the Release 3 tag |
-| Commit subject | SEC: claim enforcement on every mutation (v2.2.0-rc2) -- one table, one predicate |
-| Last pyverify change at or before it | `16a9aad600ab0b7951ac9ea844f3087ec750d239` |
+| Status | **DEV ONLY: rc2 SEC 86c61b4b (lane/m4b-sec). Re-vendor from the Release 3 tag before 1.2.0.** |
+| Platform commit | `86c61b4bb50f29807c53d636877131131eba79f5` (2026-10-14T18:40:00+01:00) |
+| Commit subject | SEC rc2: claim e2e side-effect detector ignores the heartbeat LED byte |
+| Last pyverify change at or before it | `e3aba18c3c800dea618a091064ef58d85435f94d` |
 | Source | `git archive <commit> host/pyverify` (committed files only) |
-| Built with | `pip wheel --no-deps`, pip 26.2.1, Python 3.11.13, SOURCE_DATE_EPOCH=1791971388 |
+| Built with | `pip wheel --no-deps`, pip 26.2.1, Python 3.11.13, SOURCE_DATE_EPOCH=1791999600 |
 
 Check it: `sha256sum vendor/mps3_pyverify-0.1.0-py3-none-any.whl` must print the sha256 above.
 `tests/unit/test_l5_release.py` checks this in `make check`.
