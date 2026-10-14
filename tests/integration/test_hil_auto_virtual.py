@@ -179,10 +179,23 @@ class LinuxLab:
 @contextmanager
 def linux_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
               static: int = LX_STATIC, card: bool = True,
-              single_client: bool = False, image: str = "v6n") -> Iterator[LinuxLab]:
+              single_client: bool = False, image: str = "v6n",
+              claimed_by: str = "me",
+              persist_state: str = "backing=tmpfs") -> Iterator[LinuxLab]:
+    """``claimed_by``: ``"me"`` (default): the board's SSH claim is THIS Harness Manager's (its
+    pin is the board's key, as after ``board claim --adopt``): a swap goes through the claim
+    forward. ``"other"``: claimed by a key this Harness Manager does not hold: the claim route
+    refuses the swap before sending anything (the real v2.2 board would answer ``locked``)."""
     from harness_manager_mps3 import hub as hubmod
     from harness_manager_mps3 import tunnel as T
-    from tests.fakes.claimed_lock import TRUSTED, HubAndBoardSsh, board_key_fp, route_board
+    from tests.fakes.claimed_lock import (
+        HUB,
+        TRUSTED,
+        HubAndBoardSsh,
+        board_key_fp,
+        pin_claim,
+        route_board,
+    )
     from tests.fakes.fake_mcc import FakeMcc
     from tests.fakes.hub_mcc_fakes import HubTool, PtyMcc
     from tests.fakes.l1_fake_hub import FakeHub
@@ -224,9 +237,33 @@ def linux_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
     tool = HubTool(HubProbe(hub, fake.identify_port), mcc=mcc, pty=pty,
                    tty="/dev/mps3_01_pl/tty_00")
     monkeypatch.setattr(hubmod, "DEFAULT_RUNNER_FACTORY", lambda *_a, **_k: tool)
-    from tests.fakes.claimed_lock import HUB
     write_boards_toml(state_dir(), f'[boards.lab]\nmatch = ["{BOARD}"]\nvia = "ssh:{HUB}"\n'
                                    f'hub = {{ host = "{HUB}", target = "mps3_01_pl" }}\n')
+    if claimed_by == "me":
+        from harness_manager.cli import cmd_claim
+
+        def ssh_persist_state(argv: Any) -> int:
+            # B3's `board ssh -c "cat /run/mps3/persist.state"`: no real ssh in a test; a
+            # netbooted board's persist.state names tmpfs (``persist_state``)
+            import sys
+
+            sys.stdout.write(persist_state + "\n")
+            return 0
+
+        monkeypatch.setattr(cmd_claim, "run_ssh", ssh_persist_state)
+        # the swap's on-board OpenOCD guard asks `mps3-debug down` over the claim's one-shot ssh
+        from harness_manager_mps3 import claim as CL
+        from tests.fakes.do_fake_launcher import FakeLauncher
+
+        monkeypatch.setattr(CL, "DEFAULT_RUN", FakeLauncher(board_ip=BOARD, hub=HUB))
+        from harness_manager.core.services import EngineConfig
+        from harness_manager.engine import Engine
+
+        eng = Engine(EngineConfig(state_dir=state_dir()))
+        try:
+            pin_claim(type("S", (), {"candidate": eng.candidate_for(BOARD)})())
+        finally:
+            eng.close_all()
     try:
         yield LinuxLab(fake, hub, tool, ssh, front)
     finally:
@@ -252,9 +289,8 @@ def test_the_linux_netboot_plan_passes_against_the_linux_harness_fake(lx, tmp_pa
     v = verdicts(tmp_path / "ev")
     assert rc == EXIT_PASS, (v, s["first_failure"])
     assert {k for k, x in v.items() if x == "pass"} == {
-        "0.2", "0.3", "0.4", "A1", "A2", "A3", "A5", "A6", "B1", "C1", "D1", "D4a", "E1", "E1b",
-        "Z2", "Z2b"}
-    assert v["B3"] == "skipped"                                # claimed by another key: no adopt
+        "0.2", "0.3", "0.4", "A1", "A2", "A3", "A5", "A6", "B1", "B3", "C1", "D1", "D4a", "E1",
+        "E1b", "Z2", "Z2b"}
     # HIL-IDLOC: this FakeShell is an image without the v0.16 identity and locate features (v6n)
     a5 = json.loads((tmp_path / "ev" / "a5_identity.json").read_text())
     assert a5["exit"] == 0 and a5["stdout_json"]["identity"]["reported"]["feature"] is False
@@ -263,8 +299,8 @@ def test_the_linux_netboot_plan_passes_against_the_linux_harness_fake(lx, tmp_pa
     assert next(c for c in s["checks"] if c["id"] == "A6")["reason"].startswith(
         "not on this image")
     assert lx.fake.current_rm_id == 0 and s["end_state"]["greybox"] is True
-    assert s["end_state"]["claim"] == {**s["end_state"]["claim"], "start": "other",
-                                       "end": "other", "unchanged": True}
+    assert s["end_state"]["claim"] == {**s["end_state"]["claim"], "start": "mine",
+                                       "end": "mine", "unchanged": True}
     # the swap went over 6910 and nothing touched the card or the slots
     pushes = lx.fake.accepted_pushes                      # two swaps: clearing + partial each
     assert len(pushes) == 4 and {p.transport for p in pushes} == {"tcp"}
@@ -310,12 +346,32 @@ def test_a_card_job_refuses_the_swap_and_the_runner_stops_without_force(lx, tmp_
 
 
 def test_twin_the_full_linux_plan_expects_valid_slots_and_fails_c1_on_a_netbooted_board(
-        lx, tmp_path, capsys):
-    acquire(capsys)
-    rc, _ = hil(tmp_path / "ev", "linux")
-    s = summary(tmp_path / "ev")
-    assert rc == 1 and s["first_failure"]["id"] == "C1"
-    assert "slots.A.state" in s["first_failure"]["reason"]
+        tmp_path, monkeypatch, capsys):
+    # B3 sees a card-backed persist.state (the full plan's), so C1 is the first failure
+    with linux_lab(tmp_path, monkeypatch,
+                   persist_state="backing=card dev=/dev/mmcblk0p3 storage=ok") as lab:
+        acquire(capsys)
+        rc, _ = hil(tmp_path / "ev", "linux")
+        s = summary(tmp_path / "ev")
+        assert rc == 1 and s["first_failure"]["id"] == "C1"
+        assert "slots.A.state" in s["first_failure"]["reason"]
+        assert lab.fake.accepted_pushes == []
+
+
+def test_twin_a_board_claimed_by_another_key_stops_at_e1_and_sends_no_swap(
+        tmp_path, monkeypatch, capsys):
+    """The claim route refuses the swap BEFORE sending: this Harness Manager does not hold the
+    claim (B2's adopt not done), so the netboot plan stops at E1 in the claim's plain words,
+    and the board saw no swap."""
+    with linux_lab(tmp_path, monkeypatch, claimed_by="other") as lab:
+        acquire(capsys)
+        rc, hm = hil(tmp_path / "ev", "linux-netboot", "--writes", "safe")
+        s = summary(tmp_path / "ev")
+        assert rc == EXIT_STOP and s["stopped"]["check"] == "E1", s["stopped"]
+        assert "needs the claiming key over the board's own SSH" in s["stopped"]["reason"]
+        assert verdicts(tmp_path / "ev")["B3"] == "skipped"        # no adopt: B3 cannot run
+        assert lab.fake.accepted_pushes == [] and lab.fake.current_rm_id == 0
+        assert not any("--force" in a for a in hm.calls)
 
 
 def test_the_lease_taken_away_mid_run_stops_and_the_board_is_left_alone(lx, tmp_path, capsys):
@@ -354,7 +410,7 @@ def test_the_linux_nocard_plan_passes_against_a_card_less_board(nocard, tmp_path
     v = verdicts(tmp_path / "ev")
     assert rc == EXIT_PASS, (v, s["first_failure"])
     assert {k for k, x in v.items() if x == "pass"} == {
-        "0.2", "0.3", "0.4", "A1", "A2", "A3", "A5", "A6", "B1", "C1", "D1", "D4a", "E1", "E1b",
+        "0.2", "0.3", "0.4", "A1", "A2", "A3", "A5", "A6", "B1", "B3", "C1", "D1", "D4a", "E1", "E1b",
         "Z2", "Z2b"}
     assert {k for k, x in v.items() if x == "skipped"} >= {
         "C2", "D2", "D3", "D4", "D5", "F6", "G1", "G2", "G3", "G4", "Z1", "Z2c"}
