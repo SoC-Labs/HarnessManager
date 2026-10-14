@@ -166,7 +166,9 @@ STALL_ENV = "HARNESS_MANAGER_MPS3_SLOT_PUSH_TIMEOUT_S"
 STALL_S = 900.0
 #: While a job runs, ``slot status`` may fail now and then (the control port is one client
 #: at a time): a wait keeps reading for this long before it gives up with the last state.
-STATUS_GRACE_S = 60.0
+#: 120 s (was 60): through a claim tunnel on a loaded hub a busy board's answers can lag;
+#: the measured worst gap from the Release 3 board-1 run sets the final value.
+STATUS_GRACE_S = 120.0
 #: Host-side records kept per board (newest first).
 RECORDS_KEEP = 16
 
