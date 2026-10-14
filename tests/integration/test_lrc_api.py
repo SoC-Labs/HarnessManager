@@ -598,6 +598,7 @@ def _as_rest(client: TestClient, bid: str, *, events: bool = True):
     session.hub = SimpleNamespace(host=real.host, target=real.target, close=real.close,
                                   client=SimpleNamespace(transport="rest", target=real.target,
                                                          config=SimpleNamespace(events=events)))
+    session.lease = session.hub          # R3: a hub board's lease server IS its hub (lease_of)
     client.app.state.daemon.bus.publish(Event("session.opened", bid, {}))
     return session.hub
 
