@@ -311,6 +311,7 @@ hub adopt BOARD [--as NAME]
                            turn a board's inline hub table into a named hub
 hub remove NAME [--force]  remove a hub and your stored token for it
 
+The board's lease (its hub's, or the board's own in single-user mode):
 lease show TARGET          who holds it, until when; the queue and the requests
 lease acquire TARGET [--ttl S]
                            take it; waits in the queue if someone holds it
@@ -324,8 +325,12 @@ lease respond TARGET ID --release | --keep MINUTES
 lease force TARGET         force-release it after 2:00 with no answer (asks first)
 lease leave TARGET         leave the queue and withdraw your request
 lease dismiss TARGET       forget the last forced release of your lease
-A lease needs a hub, and nothing takes one for you: run `lease acquire`, or use
-Take lease in the app. The service renews it while the board is open there.
+lease mode TARGET [on|off] [--yes]
+                           who can use the board: shared (off) or one person at
+                           a time (on, takes the lease); no argument shows it
+A lease needs a hub or single-user mode, and nothing takes one for you: run
+`lease acquire`, or use Take lease in the app. The service renews it while the
+board is open there. Single-user mode is a courtesy lock.
 --via ssh:HOST (or via = "ssh:HOST" in boards.toml) is a tunnel only: no hub,
 so no lease. --via hub goes through the board's hub.
 

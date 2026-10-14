@@ -186,7 +186,7 @@ def test_twin_the_board_summary_before_board_identity_is_reported():
 def test_twin_a_summary_that_drops_a_subverb_is_reported():
     old = "the board's hub lease: show, acquire, request, force, leave, release"
     subverbs = list(_verbs(_verbs(make_parser())["lease"]))
-    assert unnamed_subverbs("lease", old, subverbs) == ["requests", "respond", "dismiss"]
+    assert unnamed_subverbs("lease", old, subverbs) == ["requests", "respond", "dismiss", "mode"]
 
 
 # --- --via and --serial --------------------------------------------------------------------------

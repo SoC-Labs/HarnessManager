@@ -64,6 +64,11 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("DELETE", "/boards/{bid}/lease/queue"),
         ("DELETE", "/boards/{bid}/lease/taken"),
     ),
+    # Release 3 (HM-C): single-user mode; served in the mock by l3_week_plan.register below.
+    "lease_mode_api": (
+        ("GET", "/boards/{bid}/lease/mode"),
+        ("POST", "/boards/{bid}/lease/mode"),
+    ),
     "power_api": (
         ("GET", "/boards/{bid}/power"),
         ("POST", "/boards/{bid}/power/cycle"),
@@ -688,6 +693,16 @@ class WeekPlanSim:
         return report
 
 
+def _mode_off(behind_hub: bool) -> dict[str, Any]:
+    """``GET .../lease/mode`` for a demo board: not available, with the reason."""
+    why = ("Behind a hub, the hub's lease already does this." if behind_hub else
+           "This board does not offer single-user mode: it needs a release with the "
+           "board_lease feature.")
+    return {"available": False, "reason": why, "single_user": False, "can_change": False,
+            "change_reason": why, "since_s": 0, "by": "", "persisted": True, "local_hold_s": 0,
+            "courtesy": False, "label": "", "ttl_min": 15}
+
+
 def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any) -> None:
     """Add the week-plan routes to the mock app (``ok``/``accepted`` are the mock's helpers)."""
     jobs = state.jobs
@@ -757,7 +772,7 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
         # docs/LEASE_REQUESTS.md adds queue, request, incoming and taken.
         more = sim.requests.view(bid) if sim.requests is not None else {}
         if hub is None:
-            return ok(lease=None, hub=None, **more)
+            return ok(lease=None, hub=None, server=None, mode=None, **more)   # Release 3
         reads = sim.lease_reads.get(bid, "")
         reset = (f"lease show on {hub['host']} failed: lease show failed: ssh: connect to host "
                  f"{hub['host']} port 22: Connection reset by peer")
@@ -774,7 +789,26 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
             lease["board"] = hub_board(hub)                     # LEASE-BOARD: as GET /lease has it
         if lease is not None and sim.requests is not None:
             lease.update(sim.requests.lease_keys(bid))          # D12: holder_kind
-        return ok(lease=lease, hub=hub["host"], **more)
+        # Release 3 (additive): whose lease it is; a hub has no mode.
+        server = {"kind": "hub", "host": hub["host"], "name": hub["host"]}
+        return ok(lease=lease, hub=hub["host"], server=server, mode=None, **more)
+
+    @app.get(f"{API}/boards/{{bid}}/lease/mode")
+    def lease_mode_get(bid: str) -> dict[str, Any]:
+        """Release 3: the demo's boards cannot switch (a hub's lease, or no ``board_lease``)."""
+        from .t14_lease_requests import listed_board
+
+        listed_board(state, bid)
+        return ok(board_id=bid, **_mode_off(sim.hubs.get(bid) is not None))
+
+    @app.post(f"{API}/boards/{{bid}}/lease/mode")
+    def lease_mode_post(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:  # noqa: B008
+        if not isinstance(body.get("single_user"), bool):
+            raise UsageError("single_user must be true (one person at a time) or false (shared)")
+        if body.get("confirm") is not True:
+            raise UsageError("changing who can use the board needs \"confirm\": true")
+        state.session(bid)
+        raise UnavailableError("board_lease", _mode_off(sim.hubs.get(bid) is not None)["reason"])
 
     @app.post(f"{API}/boards/{{bid}}/lease", status_code=202)
     def lease_take(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008

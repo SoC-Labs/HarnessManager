@@ -69,11 +69,13 @@ from harness_manager.cli.cmd_hub import (
     force_refusal,
     full_view,
     keep_minutes,
+    mode_json,
     request_id,
     request_refusal,
 )
 from harness_manager.core.errors import AbsentError, HarnessError, UsageError
 from harness_manager.core.events import Event
+from harness_manager.services import lease_backend
 from harness_manager.services.lease import (
     DEFAULT_TTL_S,
     LeaseService,
@@ -113,6 +115,25 @@ def _ttl(body: dict[str, Any]) -> int | None:
 
 def _now() -> float:
     return time.time()
+
+
+def server_of(adapter: Any) -> dict[str, Any]:
+    """``server`` of the lease view: ``{kind: hub|board, host, name}``."""
+    return {"kind": lease_backend.kind_of(adapter), "host": getattr(adapter, "host", "") or "",
+            "name": getattr(adapter, "name", "") or getattr(adapter, "host", "") or ""}
+
+
+def mode_of(adapter: Any) -> dict[str, Any] | None:
+    """``mode`` of the lease view: the board's mode, null behind a hub or when it cannot say."""
+    if lease_backend.kind_of(adapter) != lease_backend.KIND_BOARD:
+        return None
+    try:
+        mode = lease_backend.mode_of(adapter)
+    except HarnessError:
+        return None
+    if mode is None:
+        return None
+    return mode_json(mode)
 
 
 def _view(leases: Any, hub: Any) -> dict[str, Any]:
@@ -196,7 +217,7 @@ def register(ctx: RouteContext) -> None:
             session = d.engine.session(ev.board_id)
         except HarnessError:
             return
-        hub = getattr(session, "hub", None)
+        hub = lease_backend.lease_of(session)    # the hub's adapter, or the board's own
         if hub is not None:
             leases.track(ev.board_id, hub)
             start_stream(ev.board_id, hub)
@@ -258,23 +279,61 @@ def register(ctx: RouteContext) -> None:
 
     d.close = close
 
+    def require_server(adapter: Any, bid: str) -> Any:
+        """``require_server`` (Release 3) when the service has it, else its ``require_hub``."""
+        fn = getattr(leases, "require_server", None) or leases.require_hub
+        return fn(adapter, bid)
+
     def hub_of(bid: str, *, closed_ok: bool = False) -> Any:
-        return leases.require_hub(board_hub(bid, closed_ok=closed_ok), bid)
+        return require_server(board_hub(bid, closed_ok=closed_ok), bid)
 
     def board_hub(bid: str, *, closed_ok: bool = False) -> Any:
         """The board's hub adapter (None: no hub). ``closed_ok`` (ui2 api-hub, G3: "Request
         without opening"): a board this service lists but has not open gets its hub from the
         board pack, with no contact (``hub_boards``); an unlisted one is 404 as before."""
         try:
-            return getattr(ctx.board(bid), "hub", None)
+            return lease_backend.lease_of(ctx.board(bid))
         except AbsentError:
             hubs = getattr(d, "board_hubs", None)
             if not closed_ok or hubs is None or hubs.candidate(bid) is None:
                 raise
-        hub = hubs.adapter(bid)
+        hub = hubs.adapter(bid) or closed_lease_for(bid, hubs)
         if hub is not None:
             leases.note_board(bid, hub)       # its lease_known follows what is read here
         return hub
+
+    own: dict[str, tuple[Any, Any]] = {}      # bid -> (candidate, the board's own lease server)
+
+    def closed_lease_for(bid: str, hubs: Any) -> Any:
+        """A closed board with no hub: its pack's ``lease_for`` (the board as its own lease
+        server, Release 3). Packs without it (and boards without the feature) give None."""
+        cand = hubs.candidate(bid)
+        pack = d.engine.packs().get(getattr(cand, "pack", ""))
+        fn = getattr(pack, "lease_for", None)
+        if not callable(fn):
+            return None
+        with mu:
+            hit = own.get(bid)
+        if hit is not None and hit[0] == cand:
+            return hit[1]
+        try:
+            adapter = fn(cand)
+        except Exception as exc:  # noqa: BLE001 - a bad table only costs this board its lease
+            log.info("no lease server for %s: %s", bid, getattr(exc, "message", exc))
+            return None
+        with mu:
+            own[bid] = (cand, adapter)
+        return adapter
+
+    def drop_own(ev: Event) -> None:
+        with mu:
+            if ev.topic == "settings.changed" or not ev.board_id:
+                own.clear()
+            else:
+                own.pop(ev.board_id, None)
+
+    for topic in ("settings.changed", "session.opened", "session.closed"):
+        d.bus.subscribe(topic, drop_own)
 
     def is_open(bid: str) -> bool:
         return bid in d.engine.open_boards()
@@ -413,14 +472,18 @@ def register(ctx: RouteContext) -> None:
         # The service's view is the frozen shape (it adds queue/request/incoming/taken);
         # passed through as it is, so the keys it has not added yet are simply absent.
         # ui2 api-hub (G11): with the background queue (over SSH one more read, reused 60 s)
-        return _JSON(ok(**_view(leases, hub)))
+        out = _view(leases, hub)
+        if hub is not None and isinstance(out, dict):
+            out.setdefault("server", server_of(hub))      # additive; the service's wins
+            out.setdefault("mode", mode_of(hub))
+        return _JSON(ok(**out))
 
     @ctx.api.post("/boards/{bid:path}/lease")
     def lease_acquire(bid: str, body: JsonBody = None) -> _JSON:
         b = _obj(body)
         ttl = _ttl(b)
         session = ctx.board(bid)
-        hub = leases.require_hub(getattr(session, "hub", None), bid)
+        hub = require_server(lease_backend.lease_of(session), bid)
         job = d.jobs.submit(LEASE_KIND, bid, lambda progress: leases.acquire(
             hub, board_id=bid, ttl_s=ttl, progress=progress))
         return ctx.accepted(job)
@@ -432,7 +495,7 @@ def register(ctx: RouteContext) -> None:
             queued = bid in requesting
         if queued:
             # A queued request: DELETE /lease cancels it as it cancels a queued acquire.
-            hub = leases.require_hub(hub, bid)
+            hub = require_server(hub, bid)
             out = leases.leave(bid, hub) or {}
             stop_request(bid)
             return _JSON(ok(cancelled=True, left=True,
