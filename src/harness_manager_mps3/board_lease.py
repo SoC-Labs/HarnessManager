@@ -92,14 +92,14 @@ F_N = "n"                                            # history, 1-8
 F_MSG, F_ID = "msg", "id"                            # request (msg <= 48); respond/cancel (id)
 F_ACCEPT, F_MINUTES = "accept", "minutes"            # respond (minutes 5-60 when accept is false)
 F_CONFIRM = "confirm"                                # revoke: the board's label
-F_MODE = "mode"                                      # mode
+F_MODE = "mode"                                      # mode (on also takes ttl_s 300-14400)
 MSG_MAX = 48
 HISTORY_MAX = 8
 TTL_MIN_S, TTL_MAX_S = 300, 14400
 KEEP_MIN, KEEP_MAX = 5, 60
 
 #: Reply fields.
-R_MODE, R_PERSISTENT = "mode", "persistent"
+R_MODE, R_PERSISTENT, R_OWNER = "mode", "persistent", "owner"
 R_HOLDER, R_QUEUE = "holder", "queue"
 R_LOCAL_HOLD, R_RECLAIM = "local_hold_s", "reclaim_s"
 R_TOKEN, R_EXPIRES, R_GRANTED = "token", "expires_in_s", "granted"
@@ -195,6 +195,8 @@ def refusal(reply: dict[str, Any], what: str) -> HarnessError:
                           "switched on again from here after the hold ends",
             "not_holder": "only the person holding the lease (or the board's owner) can do this",
             "busy_access": "someone is using the board's touchscreen access page now",
+            "busy": "the holder still has time to answer, or nobody has an unanswered request: "
+                    "ask for the board (Request) first",
             }.get(code, "see who holds the board: `harness-manager lease show`")
     exc: HarnessError
     if code == "locked":
@@ -338,16 +340,25 @@ class BoardLeaseClient:
 
     @staticmethod
     def _mode_of(reply: dict[str, Any]) -> LeaseMode:
-        """The mode from a ``show``-keyed reply. The wire carries no owner/can_change flag: the
-        board decides (``denied``), so a change is offered unless the touchscreen hold bars it."""
+        """The mode from a ``show``-keyed reply. ``owner`` (show/heartbeat/mode replies) says
+        whether this key is the board's owner: ON is the owner's alone; OFF is the owner's or the
+        holder's (``holder.you``). Absent ``owner``: the board decides (``denied``), so a change is
+        offered unless the touchscreen hold bars it."""
         hold = _int(reply.get(R_LOCAL_HOLD))
         single = _text(reply.get(R_MODE)) == MODE_SINGLE
-        barred = hold > 0 and not single
-        return LeaseMode(
-            single_user=single, can_change=not barred,
-            change_reason=(f"single-user mode was switched off at the board; it can be switched "
-                           f"on again in {hold} s" if barred else ""),
-            persisted=reply.get(R_PERSISTENT) is not False, local_hold_s=hold)
+        owner = reply.get(R_OWNER)
+        can, why = True, ""
+        if not single and hold > 0:
+            can, why = False, (f"single-user mode was switched off at the board; it can be "
+                               f"switched on again in {hold} s")
+        elif isinstance(owner, bool):
+            you = _obj(reply.get(R_HOLDER)).get(H_YOU) is True
+            if not single and not owner:
+                can, why = False, "only the board's owner can turn single-user mode on"
+            elif single and not (owner or you):
+                can, why = False, "only the board's owner or the lease holder can turn it off"
+        return LeaseMode(single_user=single, can_change=can, change_reason=why,
+                         persisted=reply.get(R_PERSISTENT) is not False, local_hold_s=hold)
 
     def lease_show(self) -> LeaseView:
         reply = self.show()
@@ -405,8 +416,9 @@ class BoardLeaseClient:
             ev: dict[str, Any] = {"ts": iso(now - _int(e.get(E_AGE))), "holder": who,
                                   "reason": info, "by": "", "ev": kind}
             ev["event"] = HISTORY_EVENTS.get(kind) or f"lease.{kind}"
-            if kind == "revoke":
-                ev["prior_holder"] = who
+            if kind == "revoke":                      # who = the head that forced it
+                m = re.match(r"from (.+)", info)
+                ev.update(prior_holder=m.group(1).strip() if m else "", by=who)
             out.append(ev)
         out.sort(key=lambda e: e["ts"])           # ISO UTC sorts by time; stable keeps ties
         return out[-limit:]
@@ -438,6 +450,8 @@ class BoardLeaseClient:
                 left = _int(reply.get(R_EXPIRES), ttl_wire)
                 return BoardGrant(token, left), iso(self._wall() + left)
             queued = reply.get("ok") is not False and reply.get(R_GRANTED) is False
+            if reply.get("ok") is False and _text(reply.get("code")) == CODE_QUEUED:
+                return self._already_ours(holder, ttl_wire)      # "lease already held by you"
             if not queued:
                 raise refusal(reply, "board lease acquire")
             pos = _int(reply.get(R_POSITION))
@@ -450,6 +464,22 @@ class BoardLeaseClient:
                     + ("; the queue place was removed" if with_cancel else ""),
                     hint="ask for the board (Request) or try again later")
             wait(min(poll_s, POLL_HEAD_S) if pos == 1 else poll_s)
+
+    def _already_ours(self, holder: str, ttl_wire: int) -> tuple[BoardGrant, str]:
+        """``lease_held`` on our own acquire (matched by ``who``, the reply has NO token): the
+        lease is already ours, so keep using the STORED token. Without one (new state dir, wiped
+        store) do not loop: say so in plain words."""
+        token = self.current_token()
+        view = _obj(self.show().get(R_HOLDER))
+        left = _int(view.get(H_EXPIRES), ttl_wire)
+        if _TOKEN.fullmatch(token):
+            self._set_token(token)
+            return BoardGrant(token, left), iso(self._wall() + left)
+        raise ActionFailedError(
+            "This board's lease is held under your name, but this Harness Manager no longer has "
+            f"its key. Wait for it to run out (about {max(1, round(left / 60))} min) or ask the "
+            "board's owner to switch single-user mode off.",
+            hint="the owner can switch single-user mode off from Harness Manager or the touchscreen")
 
     def lease_heartbeat(self, token: str, holder: str) -> str:
         """Extend the lease (the acquire's TTL again). Returns the new ``expires_at``. A token
@@ -488,6 +518,12 @@ class BoardLeaseClient:
         """Leave the queue (by the ``id`` the queued ``acquire`` returned). True when a queue
         place was removed."""
         qid = self._queue_id
+        if not qid:                                   # a fresh process (CLI poll): find our place
+            try:
+                qid = next((_text(w.get(W_ID)) for w in self._waiters()
+                            if _text(w.get(W_WHO)) == holder), "")
+            except HarnessError:
+                qid = ""
         if not qid:
             return False
         reply = self._write("cancel", raw=True, **{F_ID: qid})
@@ -592,14 +628,15 @@ class BoardLeaseClient:
     def set_mode(self, on: bool, *, take: bool = False, confirm_board: str = "") -> ModeResult:
         """Switch single-user mode. The wire has one request key, ``mode``: turning it ON by the
         owner also grants the owner the lease (the reply carries ``token`` and ``expires_in_s``;
-        ``take`` is therefore implicit and the TTL is the board's default); OFF is the owner's
+        ``take`` is therefore implicit; ``ttl_s`` is HM's board TTL); OFF is the owner's
         or the holder's (our token rides along). ``confirm_board`` has no wire field. Owner-only
         rules are the board's (``denied``)."""
-        reply = self._write("mode", lease=self.current_token(), **{F_MODE: MODE_SINGLE if on else MODE_OPEN})
+        ttl = max(TTL_MIN_S, min(int(self._ttl_s), TTL_MAX_S)) if on else None
+        reply = self._write("mode", lease=self.current_token(),
+                            **{F_MODE: MODE_SINGLE if on else MODE_OPEN, F_TTL: ttl})
         token = _text(reply.get(R_TOKEN))
         granted = bool(on and _TOKEN.fullmatch(token))
         if granted:
-            self._ttl_s = DEFAULT_TTL_S
             self._principal = ""
             self._set_token(token)
         elif not on:

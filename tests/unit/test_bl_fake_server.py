@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from tests.fakes.bl_board_lease import BoardLeaseServer
 
-SHOW_KEYS = {"ok", "op", "act", "mode", "persistent", "holder", "queue", "local_hold_s",
+SHOW_KEYS = {"ok", "op", "act", "mode", "persistent", "owner", "holder", "queue", "local_hold_s",
              "reclaim_s"}
 
 
@@ -123,3 +123,24 @@ def test_respond_keep_and_revoke_follow_the_request_window():
     lease(s, "request", who="b", msg="again")
     s.tick(121)
     assert lease(s, "revoke", confirm="mps3-01")["ok"] and lease(s, "show")["holder"] is None
+
+
+def test_mode_on_takes_ttl_s_and_every_show_keyed_reply_carries_owner():
+    s = srv()
+    on = lease(s, "mode", mode="single_user", ttl_s=900)
+    assert on["expires_in_s"] == 900 and on["owner"] is True
+    assert lease(s, "heartbeat", lease=on["token"])["owner"] is True
+    assert lease(srv(claimed=False), "show")["owner"] is False
+    assert lease(srv(), "mode", mode="single_user", ttl_s=100)["code"] == "invalid"
+
+
+def test_revoke_history_who_is_the_head_and_info_names_the_holder():
+    s = srv()
+    lease(s, "acquire", who="a", ttl_s=600)
+    lease(s, "request", who="b", msg="x")
+    s.tick(121)
+    assert lease(s, "revoke", confirm="mps3-01")["ok"]
+    assert lease(s, "history", n=2)["events"][-2]["ev"] in ("reserve", "revoke")
+    rev = [e for e in lease(s, "history")["events"] if e["ev"] == "revoke"][0]
+    assert rev["who"] == "b" and rev["info"] == "from a"
+    assert lease(s, "show", lease=5)["code"] == "bad_args"
