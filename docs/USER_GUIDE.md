@@ -660,6 +660,81 @@ never keeps a control connection open between polls.
 A board's `poll` overrides the general setting, both ways. The demo (`--demo`) has
 scripted boards only and polls them as before.
 
+### One person at a time (single-user mode)
+
+**Needs:** a board on your desk, claimed by this Harness Manager (the Linux harness, on a
+release that offers single-user mode). No hub and no extra software.
+
+**When:** several people can reach the same desk board (a workshop table, a shared lab
+bench) and you want only one of them driving it at a time.
+
+**What it is.** The board keeps its own lease, and it works the way a hub board's lease does
+([above](#4-leases-share-a-lab-board)): whoever holds the lease can program, reset and
+debug; everyone else can watch the board, see who has it, and ask for it. The lease buttons,
+the badge and the request flow are the same. Only the words change: "the board" instead of
+"the hub". Reads and requests go over the board's usual control port; changes go over the
+SSH claim Harness Manager already uses.
+
+**Switch it on or off.** Board > Access > **Who can use this board**, a switch with two
+settings: **Shared** and **One person at a time**.
+- **On:** only the person who claimed the board can do it, and only while the board is free.
+  Harness Manager asks "Switch `<board>` to one person at a time?", and the button **Switch
+  and take the lease** switches the mode and gives you the lease in one step. You hold it for
+  15 minutes at a time (Settings: `lease.board_ttl_min`), renewed while the board is open
+  here.
+- **Off:** the person who claimed the board, or whoever holds the lease. If someone else
+  holds the lease, switching off ends their lease now and interrupts what they are running,
+  so Harness Manager asks you to type the board's name first.
+- Command line: `harness-manager lease mode TARGET on`, `lease mode TARGET off` (add `--yes`
+  to skip the question); `lease mode TARGET` alone shows the mode.
+
+The mode is the board's, not a setting on your PC: every PC that opens the board sees it,
+and it stays until someone switches it. The control is greyed out, with the reason beside
+it, when:
+- the board is not claimed yet: "Claim the board first (SSH claim, above): the lease needs
+  to know whose key is whose."
+- you did not claim it: "Only the person who claimed the board can switch this on."
+- the board's release is too old: "This board's release can't do single-user mode."
+- the board is behind a hub: "Behind a hub, the hub's lease already does this." The switch is
+  read-only there; the hub's lease is what you use.
+
+**What the others see.** A board in this mode shows "One person at a time, switched on by
+`<who>`." Anyone who does not hold the lease sees the same lease badge as on a hub board
+(**Held by `<who>`**), has the controls that change the board greyed out, and can still read
+it. To ask for the board:
+1. Press **Request board** and, if you like, type a message.
+2. You join the queue (up to four people). The holder gets a prompt on every page:
+   **Release now**, or **Keep** for 5, 15, 30 or 60 minutes, with a message.
+3. If the holder does not answer within 2 minutes, and you are first in the queue,
+   **Force give back** appears. It asks you to type the board's name, then ends their lease
+   and gives it to you. Anything they were running is interrupted.
+4. **Leave queue** withdraws your request at any time.
+
+The times are counted by the board, not by your clock, so a PC with a wrong clock sees the
+same countdown as everyone else. A lease the holder stops renewing (a closed laptop, a
+crashed app) lapses by itself, and the next person in the queue gets the board.
+
+**The courtesy lock.** Harness Manager shows, beside the mode, the board's own words: "Courtesy
+lock: it keeps people out of each other's way and keeps out anyone without a key, but anyone
+whose key is on the board can still get round it." In plain terms: this is not a security
+boundary between people who share keys. Everyone whose key is on the board can log in over
+SSH and bypass the lease. Use it to stay out of each other's way, not to protect a board from
+a colleague.
+
+**Someone at the board can end it.** The board's touchscreen can always switch single-user
+mode off, whoever holds the lease, so a person standing at the board is never locked out of
+their own hardware. When that happens, the holder sees a banner: "`<board>`'s lease was
+ended at the board at `<time>`: someone switched off single-user mode on the touchscreen.
+The board is shared again." and "You can keep using the board, now at the same time as
+others." The mode can then be switched on again from the app after 15 minutes ("Switched off
+at the board's touchscreen; it can be switched on again in `<n>` min.").
+
+**A board with no card.** A board with no user microSD (board 2 in the lab) cannot keep the
+mode over a power-off. When it restarts it is **Shared** again, and the same applies to the
+claim itself (see [12.1](#121-claim-the-board-once)). On a board with a card, the mode and
+the lease come back after a restart: the holder has five minutes to reclaim the lease before
+the next person in the queue can have it.
+
 ## 5. Consoles
 
 **Needs:** a board.
@@ -1663,6 +1738,21 @@ exits 15 (`not confirmed`) and changes nothing: add `--yes`, for example
 the **public** key (`.pub`).
 
 Nothing claims a board by itself.
+
+### A claimed board only takes changes through SSH
+
+Once a Linux board is claimed it refuses every command that changes it (swap a design,
+reset, set the clock, link, display, touch calibration, reboot, and every design or TFTP
+push) unless it comes over the claiming key's SSH. Reading stays open. So Harness Manager
+**routes these through the claim connection by itself**: you press the same buttons and run
+the same commands, and nothing extra is needed. This holds with a hub, on the LAN, and in
+single-user mode.
+
+If the board is claimed by a key this Harness Manager does not have, the change is refused
+before anything is sent, with the claim's plain words; if the claim is yours, `board claim
+TARGET --adopt`. If the board lost its claim in the meantime, Harness Manager says so: "The board lost its claim when it restarted (it has no card to
+keep it). Claim it again from this PC." That happens to a board with no user microSD after
+every power-off. Claim it again (Board > Access > **Claim this board**) and carry on.
 
 ### 12.2 The user microSD
 

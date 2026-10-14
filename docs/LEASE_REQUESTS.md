@@ -36,6 +36,30 @@ Two Harness Manager sessions never talk directly; they may be on different machi
 | **Same person, two sessions** (CCR-A2) | fpgahub keys leases on `user@hubhost`, so a second session of the same person would be handed the lease back instead of queueing. `request()` refuses when `lease_status().holder == principal()`: "you already hold this board (another session)". |
 | **Polling** | A session watches its incoming requests every **10 s** while it holds a lease and the board is open. A requester watches its request and the answers every **10 s**. Each poll is one ssh call. |
 
+## The board as the meeting point (Release 3)
+
+A desk board in single-user mode (Board > Access > Who can use this board) is its own lease
+server, so it replaces the hub as the meeting point for that board. **The rules above do not
+change**: the request, the 2-minute window, Release or Keep (5, 15, 30, 60 minutes), force
+only at the head of the queue after the deadline with no answer, the board's name typed, and
+leaving the queue. Only the places differ:
+
+| Hub | The board |
+|---|---|
+| Notes are files in a group directory on the hub. | The board keeps the notes itself and prunes old ones. A request or an answer is written over the claim SSH and read over the control port. |
+| Times are UTC timestamps, counted by each side from the note. | Times are **relative seconds from the board** ("expires in", "deadline in"). No PC's clock matters. |
+| The queue is the hub's. | The board's queue holds up to four. |
+| "the hub" in the words. | "the board" (`server.kind` is `board` in `GET /lease`). |
+| Force is the hub's admin revoke. | Force is the board's `revoke`; it is the same gate: head of the queue, past the deadline. |
+
+Two things are board-only. Someone at the touchscreen can end the mode, which ends any lease
+and shows the holder the "taken at the board" banner. A board without a card forgets the mode,
+and so its lease and notes, at power-off. A holder who reboots a board that keeps its card has
+five minutes to reclaim the lease.
+
+The mode is a courtesy lock: it stops no one whose key is on the board. The API is in
+docs/API.md ("Single-user mode"); a board behind a hub keeps using the hub's lease.
+
 ## Interfaces (frozen: build against these; changes go through the lead)
 
 ### Hub client: `harness_manager_mps3/hub.py`, lane LR-A

@@ -38,6 +38,27 @@ boards behave as before.
   `cosim cycles|halt|step N|run` command. Serial input and the network receive are not held
   while the clock is stopped.
 
+### Single-user mode
+- **A desk board can be its own lease.** Board > Access has a **Who can use this board**
+  switch: **Shared** or **One person at a time**. In the second mode the board keeps a lease
+  that works like a hub board's (Take lease, Give back lease, Request board, the queue, Keep,
+  Force give back after 2 minutes with the board's name typed), with "the board" where a hub
+  board says "the hub". It needs no hub and no extra software. Switching on is for the person
+  who claimed the board and takes the lease in the same step. Command line: `lease mode TARGET
+  [on|off]`.
+- **It is a courtesy lock, and says so.** It keeps people out of each other's way; anyone whose
+  key is on the board can still get round it.
+- **Someone at the board can end it.** Switching it off on the touchscreen takes the lease
+  away, and the holder sees a banner saying so. A board with no card goes back to Shared at
+  power-off; behind a hub the switch is read-only (the hub's lease does this).
+
+### Claimed boards
+- **A claimed board's changes go through its SSH automatically.** Swap, reset, clock, link,
+  display, touch calibration, reboot and design pushes are sent through the claim connection
+  when this Harness Manager holds the claim, and refused before anything is sent when someone
+  else's key does. A board that lost its claim when it restarted (no card) now says so, with
+  the fix, instead of a bare "locked".
+
 ### Access
 - **Adopt this board** in Board > Access, for a board claimed by a key this Harness Manager has
   no record of (the command line already had `board claim --adopt`).
