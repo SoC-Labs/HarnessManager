@@ -127,6 +127,7 @@ from pyverify.swap import (
 
 from harness_manager.core.errors import (
     ActionFailedError,
+    ClaimLockedError,
     HarnessError,
     HeldError,
     IncompatibleError,
@@ -156,7 +157,7 @@ from harness_manager.services.deploy import (
     refusal,
 )
 
-from . import constants, ctlgate
+from . import claim_route, constants, ctlgate
 from .constants import FABRIC_MISMATCH_ERRS, IMPL_LINUX, PUSH_PORT
 from .frame_progress import FrameEstimator, for_phase, nominal_push_bps
 from .overlays import CatalogueEntry, OverlayCatalogue, _same_u32
@@ -523,6 +524,20 @@ class Mps3Deploy:
 
     def deploy(self, overlay: OverlayRef, progress: Progress | None = None, *,
                keep_on_card: bool = False) -> DeployResult:
+        """CLAIMROUTE: the swap and the design push ride the claim forward on a board this
+        Harness Manager claimed (v2.2 locks them for any other peer); a direct attempt the
+        board answers with the claim lock is retried ONCE through the forward when the claim
+        is ours (``claim_route``), else refused in the claim's words."""
+        try:
+            return self._deploy(overlay, progress, keep_on_card, force_board=False)
+        except ClaimLockedError as exc:
+            if not getattr(exc, "from_reply", False):     # decided before sending: final
+                raise
+            claim_route.escalate(self._session, f"the swap to {overlay.name}", str(exc))
+        return self._deploy(overlay, progress, keep_on_card, force_board=True)
+
+    def _deploy(self, overlay: OverlayRef, progress: Progress | None, keep_on_card: bool,
+                *, force_board: bool) -> DeployResult:
         report: Progress = progress or (lambda phase, done, total: None)
         started = time.monotonic()
 
@@ -565,19 +580,26 @@ class Mps3Deploy:
         stack = contextlib.ExitStack()
         try:
             host, ctl_port, push_port = self._shell.host, self._shell.port, self.push_port
-            if keep_on_card and self._card_route(assessment.impl) == "board-ssh":
+            what = (f"keeping {overlay.name} on the card" if keep_on_card
+                    else f"the swap to {overlay.name}")
+            via_board = self._route(assessment.impl, what,
+                                    claimed=True if force_board else None) == "board-ssh"
+            transport = assessment.transport
+            if via_board:
                 from .os_slots import claim_forward
 
                 host, ctl_port, push_port = stack.enter_context(claim_forward(
-                    self._session, "deploy", f"keeping {overlay.name} on the card"))
+                    self._session, "deploy", what))
+                if transport not in (TRANSPORT_WINDOWED, TRANSPORT_TCP):
+                    transport = TRANSPORT_TCP       # the forward carries 6910, never TFTP
             timeout_s = assessment.push_timeout_s
-            if assessment.transport == TRANSPORT_WINDOWED:
+            if transport == TRANSPORT_WINDOWED:
                 pusher = _ReportingPusher(on_frame=on_frame, estimator=push_estimate,
                                           host=host, transport="tcp",
                                           tcp_port=push_port, windowed=True,
                                           window=DEFAULT_ACK_WINDOW, timeout_s=timeout_s)
                 src = "tcp"
-            elif assessment.transport == TRANSPORT_TCP:
+            elif transport == TRANSPORT_TCP:
                 pusher = _ReportingPusher(on_frame=on_frame, estimator=push_estimate,
                                           host=host, transport="tcp",
                                           tcp_port=push_port, windowed=False,
@@ -712,7 +734,9 @@ class Mps3Deploy:
                 swap.settled = True       # the shell answered: nothing is parked
             err = str((early or {}).get("err", ""))
             if early is not None and (_is_fabric_mismatch(err)
-                                      or err.strip().upper() == "EBUSY"):
+                                      or err.strip().upper() == "EBUSY"
+                                      or claim_route.is_locked(
+                                          err, str(early.get("code") or ""))):
                 raise _refusal_error(early, overlay) from exc
             said = f"; the shell then said: {err}" if err else ""
             raise ActionFailedError(
@@ -720,13 +744,12 @@ class Mps3Deploy:
                 hint="the swap was parked and will time out with the partition "
                      "decoupled; restore the baseline") from exc
 
-    def _card_route(self, impl: str) -> str:
-        """The claim's route for keeping a design on the card ("" or "board-ssh"); a board
-        this Harness Manager cannot enter is ``ClaimLockedError``, before the swap."""
-        claim = getattr(self._session, "claim", None)
-        if claim is None or not callable(getattr(claim, "lock_route", None)):
-            return ""
-        return claim.lock_route("keeping the design on the card (the card commit)", impl=impl)
+    def _route(self, impl: str, what: str, claimed: bool | None = None) -> str:
+        """The claim's route for a swap, a push or a card commit ("" or "board-ssh"); a board
+        this Harness Manager cannot enter is ``ClaimLockedError``, before anything is sent."""
+        if getattr(self._session, "claim", None) is None:
+            return ""                          # bare metal: the claim cannot exist
+        return claim_route.route_of(self._session, what, impl, claimed)
 
     # -- checks -----------------------------------------------------------------------
 
@@ -1031,6 +1054,8 @@ def _is_fabric_mismatch(err: str) -> bool:
 def _refusal_error(reply: dict, overlay: OverlayRef) -> HarnessError:
     """Map the shell's own refusal of a swap (a reply line) onto the taxonomy."""
     err = str(reply.get("err", ""))
+    if reply.get("ok") is False and claim_route.is_locked(err, str(reply.get("code") or "")):
+        return claim_route.locked_error(err, f"the swap to {overlay.name}")
     if err.strip().upper() == "EBUSY":
         return HeldError(f"the shell is busy (EBUSY): {overlay.name} was not deployed",
                          hint="another client holds the control port, or a swap is running")
@@ -1063,7 +1088,8 @@ def _swap_error(exc: SwapError, overlay: OverlayRef, raw: dict | None = None) ->
     text = str(exc)
     cause = exc.__cause__
     err = str((raw or {}).get("err", "")) if (raw or {}).get("ok") is False else ""
-    if err and _is_fabric_mismatch(err):
+    if err and (_is_fabric_mismatch(err)
+                or claim_route.is_locked(err, str((raw or {}).get("code") or ""))):
         return _refusal_error(raw or {}, overlay)
     if "static_id mismatch" in text or "unparseable shell_id" in text:
         return IncompatibleError(f"{overlay.name} does not match the running shell: {text}")

@@ -117,7 +117,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.pack import Progress, SlotInfo, SlotJob, SlotStatus, report_progress
 from harness_manager.services.update.version import same_u32 as _same_u32_text
 
-from . import ctlgate, slot_words
+from . import claim_route, ctlgate, slot_words
 from .constants import IMPL_LINUX, PUSH_PORT, REBOOT_WAIT_S_LINUX
 
 log = logging.getLogger(__name__)
@@ -650,10 +650,7 @@ class Mps3OsSlots:
     def _route(self, what: str, claimed: bool | None = None) -> str:
         """The claim's route for a slot mutation ("" direct, "board-ssh"); a board this
         Harness Manager cannot enter is ``ClaimLockedError``, before anything is sent."""
-        claim = getattr(self._session, "claim", None)
-        if claim is None or not callable(getattr(claim, "lock_route", None)):
-            return "board-ssh" if claimed else ""
-        return claim.lock_route(what, impl=IMPL_LINUX, claimed=claimed)
+        return claim_route.route_of(self._session, what, IMPL_LINUX, claimed)
 
     def _board_forward(self) -> Any:
         """``(host, control, push)`` through the session's claim forward (a ``with``)."""
@@ -927,7 +924,8 @@ class Mps3OsSlots:
         # SLOT-TIMING: never while the card job writes or reads back (a reset wedged it).
         reset_guard.check(self._session, reset_guard.ACTION_HARNESS_REBOOT)
         try:
-            resp = shell.call(lambda c: c.reboot())
+            resp = claim_route.routed_call(self._session, "restarting the harness", shell,
+                                           lambda c: c.reboot())
         except HeldError as exc:
             busy = card_job_refusal(self._session, exc)
             if busy is None:

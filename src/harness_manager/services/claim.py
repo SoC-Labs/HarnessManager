@@ -300,5 +300,5 @@ class ClaimService:
             return
         board_id = getattr(getattr(session, "candidate", None), "board_id", "")
         self.bus.publish(Event("board.claim", board_id, {
-            k: status.get(k) for k in ("state", "claimed", "host_key", "route", "action")
+            k: status.get(k) for k in ("state", "claimed", "lost", "host_key", "route", "action")
             if k in status}))

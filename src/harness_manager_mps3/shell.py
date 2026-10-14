@@ -67,7 +67,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.model import BoardIdentity, Check, Health
 
-from . import ctlgate
+from . import claim_route, ctlgate
 from . import identify as _identify
 from .capabilities import HARNESS_STATES
 from .constants import (
@@ -785,9 +785,13 @@ class Mps3Shell:
 
     def reset(self, target: str) -> None:
         """``reset`` one target. A target this harness does not know is ``UsageError``."""
-        ok, err = self.call_raw(lambda c, tap: (c.reset(target).ok, str(tap.last.get("err", ""))))
+        ok, err, code = self.call_raw(lambda c, tap: (c.reset(target).ok,
+                                                      str(tap.last.get("err", "")),
+                                                      str(tap.last.get("code") or "")))
         if ok:
             return
+        if claim_route.is_locked(err, code):      # v2.2: reset is claim-locked (claim_route)
+            raise claim_route.LockedReply(err, code)
         if any(e in err.lower() for e in _BAD_TARGET_ERRS):
             raise UsageError(f"this harness does not accept reset target {target!r} ({err})",
                              hint="list the targets with `reset --help`")
@@ -795,7 +799,7 @@ class Mps3Shell:
                                 + (f": {err}" if err else ""))
 
     def reset_dut(self) -> None:
-        resp = self.call(lambda c: c.reset("dut"))
+        resp = claim_route.locked_call(self, lambda c: c.reset("dut"))
         if not resp.ok:
             raise ActionFailedError("shell refused reset target 'dut'")
 
@@ -803,7 +807,7 @@ class Mps3Shell:
         """Restart a Linux harness WITHOUT reloading the FPGA: harnessd's ``reboot`` verb
         (net-protocol v0.11). Returns ``in_ms``, the upper bound on the restart; the
         connection drops, and ``stats().up_ms`` restarting is the witness (``os_slots``)."""
-        resp = self.call(lambda c: c.reboot())
+        resp = claim_route.locked_call(self, lambda c: c.reboot())
         if not resp.ok:
             raise ActionFailedError(f"the harness refused reboot: {resp.err or '?'}",
                                     hint="it needs the watchdog (the 'reboot' feature); the "
@@ -901,7 +905,8 @@ class ShellResets:
 
             guard_reset(self._session, "ACTION_HARNESS_REBOOT")   # not mid card job (B2)
             try:
-                self._shell.restart_harness()
+                claim_route.routed_op(self._session, "restarting the harness", self._shell,
+                                      lambda sh: sh.restart_harness())
             except HeldError as exc:          # EBUSY: a card job that started since (53f49b4)
                 from .os_slots import card_job_refusal
 
@@ -914,7 +919,8 @@ class ShellResets:
             raise UsageError(f"reset target {target!r} is not supported by this harness",
                              hint="targets: " + ", ".join(known))
         try:
-            self._shell.reset(target)
+            claim_route.routed_op(self._session, f"the {target} reset", self._shell,
+                                  lambda sh: sh.reset(target))
         except UsageError as exc:
             self._refused.add(target)
             if target in self._accepted:
