@@ -333,8 +333,8 @@ def test_every_verb_has_a_success_and_a_failure_case():
     # bringup (BRINGUP-USB) needs a virtual Debug USB: pinned in test_bringup_cli.py.
     # cosim (HM 1.2 L5c) needs a mint-4 fake: pinned in tests/unit/test_l5c_cosim.py.
     # card backup/backups/restore (HM 1.2 L3) need a claim: pinned in test_persist_backup.py.
-    pinned_elsewhere = {"daemon", "ui", "app", "pty", "baud", "lease", "lease requests",
-                        "lease respond", "lease leave", "lease dismiss", "share", "xdc",
+    pinned_elsewhere = {"daemon", "ui", "app", "pty", "baud", "lease", "lease mode",
+                        "lease requests", "lease respond", "lease leave", "lease dismiss", "share", "xdc",
                         "xdc info", "panel show", "panel mirror", "identify", "kit",
                         "kit list", "kit guide", "xvc", "xvc tcl", "xvc ltx", "hub",
                         "hub test", "hub targets", "hub change", "slot", "card",

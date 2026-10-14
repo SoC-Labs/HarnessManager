@@ -10,6 +10,7 @@
     harness-manager lease respond TARGET ID --release | --keep MINUTES [--message M]
     harness-manager lease force TARGET [--yes] [--confirm-board NAME]
     harness-manager lease leave TARGET
+    harness-manager lease mode TARGET [on|off] [--yes] [--confirm-board NAME]   # no arg: show
     harness-manager lease dismiss TARGET          # forget the last forced release
     harness-manager share list TARGET
     harness-manager share start TARGET NAME      # a lane share name from boards.toml or a /dev path (never tty_00)
@@ -75,6 +76,7 @@ from harness_manager.core.errors import (
     UnavailableError,
     UsageError,
 )
+from harness_manager.services import lease_backend
 from harness_manager.services.lease import (
     DEFAULT_REQUEST_TTL_S,
     DEFAULT_TTL_S,
@@ -283,8 +285,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     target_help = "the board (192.168.10.101); its boards.toml hub table names the hub"
 
     vp = subparsers.add_parser(
-        "lease", help="the board's hub lease: show, acquire, release, request, requests, respond, "
-                 "force, leave, dismiss",
+        "lease", help="the board's lease (its hub's, or its own in single-user mode): show, "
+                 "acquire, release, request, requests, respond, force, leave, dismiss, mode",
         description="The hub lease that keeps two people off one shared board. It needs a hub "
                     "(`harness-manager hub`), and nothing takes it for you: `acquire` here, or "
                     "Take lease in the app. The Harness "
@@ -363,6 +365,23 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                                      "not asked, and the next forced release is reported again.",
                          parents=[fmt], epilog=_cols("lease dismiss"))
     sp.add_argument("target", metavar="TARGET", help=target_help)
+
+    sp = lsub.add_parser(
+        "mode", help="who can use the board: shared, or one person at a time (on | off)",
+        description="A desk board can be its own lease server. `on` switches it to one person "
+                    "at a time and takes the lease in the same step (the owner only; asks "
+                    "first); `off` shares it again (the owner or the holder). With no "
+                    "argument it shows the mode. It is a courtesy lock: it keeps people out of "
+                    "each other's way, not out of a determined one. A board behind a hub has "
+                    "its hub's lease instead.",
+        parents=[fmt], epilog=_cols("lease mode"))
+    sp.add_argument("target", metavar="TARGET", help=target_help)
+    sp.add_argument("state", nargs="?", choices=("on", "off"), default=None,
+                    help="on: one person at a time; off: shared; omitted: show")
+    sp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    sp.add_argument("--confirm-board", metavar="NAME", default=None,
+                    help="the board's name, for scripts: confirms switching off while someone "
+                         "else holds the lease")
     vp.set_defaults(fn=cmd_lease)
 
     vp = subparsers.add_parser(
@@ -386,17 +405,29 @@ def _emit(ctx: Ctx, result: Result) -> None:
     ctx.emit(result)
 
 
-def _hub(ctx: Ctx) -> tuple[Any, Any]:
-    """(candidate, the board's hub adapter) from TARGET and boards.toml, without opening it."""
+def _lease_server(ctx: Ctx) -> tuple[Any, Any]:
+    """(candidate, the board's lease server or None) from TARGET and boards.toml, without
+    opening it: its hub, else (Release 3) the board itself, for a pack with ``lease_for``."""
     from harness_manager.core.registry import load_packs
 
     cand = ctx.candidate()
     pack = load_packs().get(cand.pack)          # the installed pack (a daemon engine's are remote)
-    hub_for = getattr(pack, "hub_for", None)
-    hub = hub_for(cand) if callable(hub_for) else None
+    for name in ("lease_for", "hub_for"):
+        fn = getattr(pack, name, None)
+        server = fn(cand) if callable(fn) else None
+        if server is not None:
+            return cand, server
+    return cand, None
+
+
+def _hub(ctx: Ctx) -> tuple[Any, Any]:
+    """(candidate, the board's lease server): its hub, or the board in single-user mode."""
+    cand, hub = _lease_server(ctx)
     if hub is None:
-        raise AbsentError(f"{cand.board_id} is not behind a hub",
-                          hint="add a hub table for it to boards.toml (docs/HIL_B0.md step 0.2)")
+        raise AbsentError(f"{cand.board_id} is not behind a hub, and single-user mode is off "
+                          "(`harness-manager lease mode TARGET on`)",
+                          hint="add a hub table for it to boards.toml (docs/HIL_B0.md step 0.2), "
+                               "or switch the board to one person at a time")
     return cand, hub
 
 
@@ -849,12 +880,105 @@ def _principal(hub: Any) -> str:
     return ""
 
 
+BEHIND_HUB = "Behind a hub, the hub's lease already does this."
+NO_FEATURE = ("This board does not offer single-user mode: it needs a release with the "
+              "board_lease feature.")
+
+
+def mode_json(mode: lease_backend.LeaseMode | None) -> dict[str, Any] | None:
+    """A ``LeaseMode`` as the API and ``--json`` show it (``label`` only while it is on)."""
+    if mode is None:
+        return None
+    return {"single_user": bool(mode.single_user), "can_change": bool(mode.can_change),
+            "change_reason": mode.change_reason, "since_s": int(mode.since_s),
+            "by": mode.by, "persisted": bool(mode.persisted),
+            "local_hold_s": int(mode.local_hold_s), "courtesy": bool(mode.single_user),
+            "label": lease_backend.COURTESY_LABEL if mode.single_user else ""}
+
+
+def mode_unavailable(server: Any) -> str:
+    """Why this board cannot switch modes (``""``: it can)."""
+    if server is None:
+        return NO_FEATURE
+    if lease_backend.kind_of(server) != lease_backend.KIND_BOARD:
+        return BEHIND_HUB
+    return ""
+
+
+def _mode_row(cand: Any, mode: lease_backend.LeaseMode) -> list[Any]:
+    return [cand.board_id, "on" if mode.single_user else "off", mode.can_change, mode.by,
+            mode.since_s, mode.persisted, mode.local_hold_s]
+
+
+def _lease_mode(ctx: Ctx, cand: Any, server: Any) -> int:
+    """``lease mode TARGET [on|off]``: show, or switch (asks first)."""
+    a = ctx.args
+    why = mode_unavailable(server)
+    if why:
+        raise UnavailableError("board_lease", why)
+    mode = lease_backend.mode_of(server)
+    if mode is None:
+        raise UnavailableError("board_lease", "The board did not report its mode.")
+    name = _name(cand) or cand.board_id
+    if a.state is None:
+        word = "one person at a time" if mode.single_user else "shared"
+        lines = [f"{name}: {word}"]
+        if mode.single_user:
+            lines.append(lease_backend.COURTESY_LABEL)
+        if mode.local_hold_s:
+            lines.append(f"switched off at the touchscreen; it can be switched on again from "
+                         f"here in {fmt_left(mode.local_hold_s)}")
+        if not mode.can_change and mode.change_reason:
+            lines.append(f"you cannot change it: {mode.change_reason}")
+        _emit(ctx, Result("lease mode", {"board_id": cand.board_id, "name": _name(cand),
+                                         "mode": mode_json(mode)},
+                          rows=[_mode_row(cand, mode)], human=lines))
+        return ExitCode.OK
+    want = a.state == "on"
+    if mode.single_user == want:
+        raise AlreadyError(f"{name} is already "
+                           f"{'one person at a time' if want else 'shared'}")
+    if not mode.can_change:
+        raise RefusedError(mode.change_reason or
+                           "only the board's owner or the lease holder can change this",
+                           hint="claim the board first, or ask the holder")
+    if not a.yes and not _stdin_is_tty():
+        raise RefusedError(f"switching {name} asks first, and there is no terminal to ask on",
+                           hint="re-run with --yes if you mean it")
+    ctx.confirm(
+        f"Switch {name} to one person at a time? You take the lease now. Someone at the board "
+        "can always switch it off on the touchscreen." if want else
+        f"Switch {name} back to shared? Anyone with a key can use it again.")
+    out = server.client.set_mode(want, take=want, confirm_board=a.confirm_board)
+    out = out if isinstance(out, dict) else {}
+    after = lease_backend.mode_of(server)
+    shown = mode_json(after) or {"single_user": want}
+    human = [f"{name}: one person at a time; you hold the lease" if want else
+             f"{name}: shared again"]
+    if want:
+        human.append(lease_backend.COURTESY_LABEL)
+    _emit(ctx, Result("lease mode", {"board_id": cand.board_id, "name": _name(cand),
+                                     "mode": shown, "lease": out.get("lease")},
+                      rows=[_mode_row(cand, after) if after is not None else
+                            [cand.board_id, "on" if want else "off", "", "", "", "", ""]],
+                      human=human))
+    return ExitCode.OK
+
+
 def cmd_lease(ctx: Ctx) -> int:
     a = ctx.args
+    if a.lease_cmd == "mode":
+        cand, server = _lease_server(ctx)
+        return _lease_mode(ctx, cand, server)
     cand, hub = _hub(ctx)
     svc = _service()
     if a.lease_cmd == "show":
         view = full_view(svc.view(hub))
+        view.setdefault("server", {"kind": lease_backend.kind_of(hub), "host": hub.host,
+                                   "name": getattr(hub, "name", "") or hub.host})
+        if "mode" not in view:
+            view["mode"] = (mode_json(lease_backend.mode_of(hub))
+                            if lease_backend.kind_of(hub) == lease_backend.KIND_BOARD else None)
         if view.get("lease"):
             view["lease"].setdefault("board", view.get("board"))     # an older service's view
         _emit(ctx, Result("lease", {"board_id": cand.board_id, "name": _name(cand), **view},

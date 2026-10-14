@@ -201,6 +201,7 @@ Events: the `update.*` topics from docs/CONTRACTS.md are forwarded as they are.
 
 **As built by L1 (hub):**
 - **Additive keys:** the tunnel object adds `forwards`, `restarts`, `pid` and `shares`; the lease object adds `user`.
+- **Additive (Release 3):** `GET /lease` adds `server` (`{kind: "hub"|"board", host, name}`: whose lease it is) and `mode` (the board's mode as in `GET /lease/mode`, `null` behind a hub). On a desk board in single-user mode every lease route works as it does behind a hub, with "the board" instead of "the hub".
 - **`DELETE /lease`** returns `{released}`, or `{cancelled: true}` for a queued acquire, and 404 when this client holds no lease.
 - **Limits:** `ttl_s` must be 60–86400, and `GET /lease` is cached for 10 s.
 - **Holds:** a queued lease job holds the board (409 with `error.data.kind == "lease"`). Cancel it with `DELETE /lease`.
@@ -620,6 +621,19 @@ The changes `harness-manager slot rollback`, `card commit` and `card clear` make
 |---|---|
 | `GET /boards/{bid}/cosim` | `{offered, reason?, mode, running, cycles, remaining}`: the clock's state; `offered` false with the reason when the board's image has no clock control |
 | `POST /boards/{bid}/cosim` `{act: "cycles"\|"halt"\|"step"\|"run", n?}` | the board's reply (`mode, running, cycles, remaining`, and `n` for step); halt, step and run need this PC's claim; `n` is 1..100000000 (400 otherwise) |
+
+### Single-user mode: who can use the board (HM 1.2, `lease_mode_api.py`, feature `board_lease`)
+
+A desk board can be its own lease server. These routes switch it between Shared and One person at a time (docs/planning/BOARD_LEASE_HM_PLAN.md). The state is the board's, so every PC sees it.
+
+| Route | Answer |
+|---|---|
+| `GET /boards/{bid}/lease/mode` | `{board_id, available, reason, single_user, can_change, change_reason, since_s, by, persisted, local_hold_s, courtesy, label, ttl_min}`. `available` is false, with `reason`, when the board lacks `board_lease` or sits behind a hub. `since_s` and `local_hold_s` are relative seconds. `local_hold_s` above 0 means it was switched off at the touchscreen and switching on from here waits. `persisted` is false on a board with no card. `label` is the courtesy-lock text while `single_user` is true. `ttl_min` is the lease length in minutes HM uses on this board (setting `lease.board_ttl_min`, default 15). |
+| `POST /boards/{bid}/lease/mode` `{single_user, confirm: true, confirm_board?}` | 202 job `lease_mode`; result `{mode, lease}`. Turning on takes the lease in the same step. |
+
+- **Refused before any job:** 400 USAGE when `single_user` is not true or false, or without `confirm: true`; 422 UNAVAILABLE when the board lacks `board_lease` or sits behind a hub ("Behind a hub, the hub's lease already does this."); 409 REFUSED when the board says this person cannot change it (not the owner or the holder), with its reason; 409 ALREADY when it is already in that mode. Switching off while someone else holds the lease is a force: `confirm_board` is the board's name typed.
+- **Event:** `lease.mode {board, single_user, by, at, via: "hm"}` (`at` is ISO UTC).
+- **Open boards only:** a board that is not open answers `GET` with `available: false` and the reason "Open the board to see who can use it."; `POST` is 404 ABSENT.
 
 ### The card contents: /persist backup and restore (HM 1.2, `persist_api.py`)
 

@@ -85,6 +85,7 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "lease respond": ("TARGET", "ID", "ANSWER", "MINUTES", "MESSAGE"),
     "lease leave": ("TARGET", "HUB", "LEFT"),
     "lease dismiss": ("TARGET", "HUB", "DISMISSED"),
+    "lease mode": ("BOARD_ID", "MODE", "CAN_CHANGE", "BY", "SINCE_S", "PERSISTED", "LOCAL_HOLD_S"),
     "share": ("TARGET", "HUB", "TTY", "TCP", "WRITER", "READERS", "RUNNING"),
     # P1: the front panel (cli/cmd_panel.py)
     "panel show": ("BOARD_ID", "SOURCE", "PAGE", "OWNER", "BANNER", "CARD", "SESSIONS", "SEQ",
