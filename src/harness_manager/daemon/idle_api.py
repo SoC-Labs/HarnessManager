@@ -48,6 +48,7 @@ from typing import Any
 from harness_manager import naming
 from harness_manager.core.errors import HarnessError
 from harness_manager.core.events import Event
+from harness_manager.services import lease_backend
 from harness_manager.services.quiet import request_is_background
 
 log = logging.getLogger(__name__)
@@ -234,7 +235,7 @@ class IdleLeases:
 
     def _hub(self, board_id: str) -> Any:
         try:
-            return getattr(self.d.engine.session(board_id), "hub", None)
+            return lease_backend.lease_of(self.d.engine.session(board_id))
         except HarnessError:
             return None
 

@@ -243,9 +243,13 @@ class BackgroundGate:
                  clock: Callable[[], float] = time.monotonic,
                  viewer_ttl_s: float = VIEWER_TTL_S,
                  backoff: tuple[float, float] = (BACKOFF_FIRST_S, BACKOFF_MAX_S),
-                 enabled: bool = True) -> None:
+                 enabled: bool = True,
+                 lease_word_of: Callable[[str], str] | None = None) -> None:
         self.policy_of = policy_of
         self.lease_of = lease_of
+        #: ``lease_word_of(board_id)``: "hub lease" or "board lease" (``lease_backend.WORDS``);
+        #: None: "hub lease", as before Release 3.
+        self.lease_word_of = lease_word_of
         self.clock = clock
         self.viewer_ttl_s = viewer_ttl_s
         self.backoff = backoff
@@ -382,9 +386,16 @@ class BackgroundGate:
             log.exception("reading the lease of %s failed", board_id)
             return "", f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
-    @staticmethod
-    def _unknown(unknown: str, policy: str) -> Quiet:
-        return Quiet(KIND_LEASE_UNKNOWN, "the hub lease could not be read: Harness Manager "
+    def _word(self, board_id: str) -> str:
+        if self.lease_word_of is None:
+            return "hub lease"
+        try:
+            return str(self.lease_word_of(board_id) or "hub lease")
+        except Exception:  # noqa: BLE001 - words never stop the gate
+            return "hub lease"
+
+    def _unknown(self, board_id: str, unknown: str, policy: str) -> Quiet:
+        return Quiet(KIND_LEASE_UNKNOWN, f"the {self._word(board_id)} could not be read: Harness Manager "
                                          "contacts this board only when you ask until it can "
                                          "(asked again on the next background read)",
                      policy=policy, detail=unknown)
@@ -406,9 +417,9 @@ class BackgroundGate:
                          policy=policy)
         holder, unknown = self._lease(board_id)
         if unknown:
-            return self._unknown(unknown, policy)
+            return self._unknown(board_id, unknown, policy)
         if holder:
-            return Quiet(KIND_LEASE, f"the hub lease is held by {holder}: Harness Manager "
+            return Quiet(KIND_LEASE, f"the {self._word(board_id)} is held by {holder}: Harness Manager "
                                      "contacts this board only when you ask", holder=holder,
                          policy=policy)
         return self._busy(board_id, policy)
@@ -439,14 +450,14 @@ class BackgroundGate:
                                 "boards.<name>.poll): Harness Manager contacts this board only "
                                 "when you ask", holder=holder, policy=policy)
         elif holder:
-            q = Quiet(KIND_LEASE, f"the hub lease is held by {holder}: Harness Manager "
+            q = Quiet(KIND_LEASE, f"the {self._word(board_id)} is held by {holder}: Harness Manager "
                                   "contacts this board only when you ask", holder=holder,
                       policy=policy)
         elif not viewers:
             q = Quiet(KIND_NO_VIEWER, "nobody is viewing this board: no background reads",
                       policy=policy)
         elif unknown:
-            q = self._unknown(unknown, policy)
+            q = self._unknown(board_id, unknown, policy)
         else:
             q = self._busy(board_id, policy)
         with self._mu:

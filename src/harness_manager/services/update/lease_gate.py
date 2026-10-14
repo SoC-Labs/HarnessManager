@@ -4,8 +4,10 @@ A shared lab board sits behind a hub, and its lease is who may drive it. Writing
 harness to it, or rebooting it into one, interrupts whoever holds the lease, so an
 install (and a rollback) runs only for the lease holder:
 
-- a board with no hub (``session.hub`` None: the Debug USB on this machine, a standalone
-  board) has no lease: the gate is open (``required: false``);
+- a board with no lease server (``lease_of(session)`` None: the Debug USB on this machine, a
+  standalone board), or a board that is its own server with single-user mode off, has no
+  lease: the gate is open (``required: false``). Release 3: a board in single-user mode
+  gates like a hub, in the board's words (``lease_backend``);
 - behind a hub, the lease must be held HERE (``LeaseService.view``: ``here``, the token is
   this Harness Manager's; ``services.lease.held_here``). Nobody holding it, someone else
   holding it, the same hub name in another session (``mine`` without ``here``, FIX-PACK-4),
@@ -21,6 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 from harness_manager.core.errors import HarnessError, HeldError
+from harness_manager.services import lease_backend
 from harness_manager.services.lease import elsewhere_text, held_here, not_fresh
 
 
@@ -31,11 +34,13 @@ def lease_state(session: Any, leases: Any) -> dict[str, Any]:
 
     ``reason`` is "" when an install may go ahead, else why not.
     """
-    hub = getattr(session, "hub", None) if session is not None else None
-    if hub is None:
+    hub = lease_backend.lease_of(session) if session is not None else None
+    if hub is None or not lease_backend.lease_required(hub):
+        # no lease server, or a board in shared mode: nothing to hold
         return {"required": False, "mine": False, "here": False, "holder": "", "target": "",
                 "reason": ""}
     target = str(getattr(hub, "target", "") or "the board")
+    word = lease_backend.server_word(hub)
     out: dict[str, Any] = {"required": True, "mine": False, "here": False, "holder": "",
                            "target": target, "reason": ""}
     forget = getattr(leases, "forget", None)
@@ -47,12 +52,12 @@ def lease_state(session: Any, leases: Any) -> dict[str, Any]:
     try:
         view = leases.view(hub) if leases is not None else None
     except HarnessError as exc:
-        out["holder"] = "unknown (the hub did not answer)"
+        out["holder"] = f"unknown ({word} did not answer)"
         out["reason"] = f"cannot confirm you hold the lease on {target}: {exc.message}"
         return out
     stale = not_fresh(view)                  # LEASE-FRESH: a carried state is not an answer
     if stale:
-        out["holder"] = "unknown (the hub did not answer)"
+        out["holder"] = f"unknown ({word} did not answer)"
         out["reason"] = f"cannot confirm you hold the lease on {target}: {stale}"
         return out
     lease = (view or {}).get("lease")
@@ -77,7 +82,8 @@ def require_lease(session: Any, leases: Any, what: str) -> dict[str, Any]:
     if st["holder"] == "nobody":
         hint = "take the lease first: `harness-manager lease acquire TARGET`"
     elif st["holder"].startswith("unknown"):
-        hint = ("an install runs for the lease holder only; retry when the hub answers "
+        hint = (f"an install runs for the lease holder only; retry when "
+                f"{lease_backend.server_word(lease_backend.lease_of(session))} answers "
                 "(`harness-manager lease show TARGET`)")
     elif st["mine"]:
         hint = "run it from the session that holds the lease, or release it there first"
