@@ -275,6 +275,7 @@ class Mps3Session(BoardSession):
             ("display", "display", "make_display_adapter"),  # LM2: the live LCD mirror
             ("net_identity", "net_identity", "make_identity_adapter"),  # BOARD-ID: label/IP/MAC
             ("harness_mcc", "harness_mcc", "make_harness_mcc_adapter"),  # FIX-PACK-2: v0.18 MCC
+            ("lease", "board_lease", "make_lease_adapter"),  # R3: the hub, else the board's own
         ):
             make = _hook(module, factory)
             if make is not None:
@@ -490,6 +491,16 @@ class Mps3Pack(BoardPack):
         """The board's hub adapter (leases, shares) without opening it; None without a hub (L1)."""
         adapter_for = _hook("hub", "adapter_for")
         return adapter_for(candidate) if adapter_for is not None else None
+
+    def lease_for(self, candidate: Candidate) -> Any:
+        """The board's lease server without opening it: its hub adapter when it has a hub, else
+        the board itself when its features include ``board_lease`` (Release 3), else None."""
+        hub = self.hub_for(candidate)
+        if hub is not None:
+            return hub
+        features = tuple(getattr(candidate.identity, "features", ()) or ())
+        make = _hook("board_lease", "adapter_for_candidate")
+        return make(candidate, features) if make is not None else None
 
     def _remote_ports(self) -> dict[str, int]:
         """The board ports a session uses, by name (what an SSH tunnel forwards; L1)."""
