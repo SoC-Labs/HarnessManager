@@ -292,11 +292,15 @@ def register(ctx: RouteContext) -> None:
         without opening"): a board this service lists but has not open gets its hub from the
         board pack, with no contact (``hub_boards``); an unlisted one is 404 as before."""
         try:
-            return lease_backend.lease_of(ctx.board(bid))
+            found = lease_backend.lease_of(ctx.board(bid))
         except AbsentError:
             hubs = getattr(d, "board_hubs", None)
             if not closed_ok or hubs is None or hubs.candidate(bid) is None:
                 raise
+        else:
+            if found is not None and bid not in leases.tracked():
+                leases.track(bid, found)      # a lease server learned after the open (features)
+            return found
         hub = hubs.adapter(bid) or closed_lease_for(bid, hubs)
         if hub is not None:
             leases.note_board(bid, hub)       # its lease_known follows what is read here

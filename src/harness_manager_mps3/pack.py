@@ -341,6 +341,9 @@ class Mps3Session(BoardSession):
             consoles.note_features(tuple(ident.features or ()))
         if ident.harness_impl:
             self._upgrade_controller(tuple(ident.features or ()))
+            upgrade = _hook("board_lease", "upgrade_session")   # R3: single-user mode
+            if upgrade is not None:
+                upgrade(self, tuple(ident.features or ()))
 
     def _upgrade_controller(self, features: tuple[str, ...]) -> None:
         """Mint 4: the first read naming ``mccif``/``mcc_local`` routes the MCC through the
@@ -492,15 +495,32 @@ class Mps3Pack(BoardPack):
         adapter_for = _hook("hub", "adapter_for")
         return adapter_for(candidate) if adapter_for is not None else None
 
-    def lease_for(self, candidate: Candidate) -> Any:
+    def lease_for(self, candidate: Candidate, *, ask: bool = False) -> Any:
         """The board's lease server without opening it: its hub adapter when it has a hub, else
-        the board itself when its features include ``board_lease`` (Release 3), else None."""
+        the board itself when its features include ``board_lease`` (Release 3), else None.
+        ``ask``: a candidate that carries no identity (a bare address) is asked once for its
+        features (one ``version`` call; the CLI does this, the daemon's closed boards do not)."""
         hub = self.hub_for(candidate)
         if hub is not None:
             return hub
-        features = tuple(getattr(candidate.identity, "features", ()) or ())
+        ident = candidate.identity
+        if ident is None and ask:
+            ident = self._ask_identity(candidate)
+        features = tuple(getattr(ident, "features", ()) or ())
         make = _hook("board_lease", "adapter_for_candidate")
         return make(candidate, features) if make is not None else None
+
+    def _ask_identity(self, candidate: Candidate) -> BoardIdentity | None:
+        eth = next((lk for lk in candidate.links if lk.kind == LinkKind.ETHERNET), None)
+        if eth is None:
+            return None
+        host, port = parse_endpoint(eth.address, CONTROL_PORT)
+        route = _hook("tunnel", "probe_route")
+        try:
+            tvia, jump = route(candidate) if route else ("", "")
+            return self._identity(host, port, tvia, 3.0, jump)
+        except HarnessError:
+            return None
 
     def _remote_ports(self) -> dict[str, int]:
         """The board ports a session uses, by name (what an SSH tunnel forwards; L1)."""

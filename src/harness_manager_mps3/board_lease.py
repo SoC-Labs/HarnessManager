@@ -189,7 +189,8 @@ class BoardLeaseClient:
         self._ttl_s = DEFAULT_TTL_S
         self._principal = ""
         self._requests: dict[str, str] = {}      # our note id -> the board's request id
-        set_lease_token_source(self.shell.gate_key, self.current_token)
+        if token_source is not None:
+            self._register()
 
     # -- the token ------------------------------------------------------------------------------
 
@@ -204,9 +205,29 @@ class BoardLeaseClient:
         except Exception:  # noqa: BLE001 - a store problem is "no token", not a crash
             return ""
 
+    def set_ttl(self, ttl_s: int) -> None:
+        """The TTL the next acquire / mode-with-take asks for (and each heartbeat repeats)."""
+        if ttl_s > 0:
+            self._ttl_s = int(ttl_s)
+
+    def use_token_source(self, source: Callable[[], str] | None) -> None:
+        """Where to read a token kept outside this process (``LeaseService`` hands over the
+        LeaseStore, so the token outlives a restart of Harness Manager)."""
+        self._token_source = source
+        if source is not None:
+            self._register()
+
+    def _register(self) -> None:
+        """Let this board's shells read our token. Done when we hold or can read one, not at
+        construction: a second client for the same board (a session that learned the feature
+        late) must not take the registry from the one that holds the lease."""
+        set_lease_token_source(self.shell.gate_key, self.current_token)
+
     def _set_token(self, token: str) -> None:
         with self._mu:
             self._token = token
+        if token:
+            self._register()
 
     # -- transport ------------------------------------------------------------------------------
 
@@ -578,6 +599,18 @@ def adapter_for_candidate(candidate: Any, features: tuple[str, ...]) -> Mps3Boar
     return Mps3BoardLease(bare)
 
 
+def upgrade_session(session: Any, features: tuple[str, ...]) -> None:
+    """A session opened from a candidate that carried no features (a board added by address, a
+    boards.toml row) learns them from its first identity read: the first one naming
+    ``board_lease`` gives it the board's own lease server (``session.lease``). A hub, or a
+    lease already there, is left alone."""
+    if FEATURE not in features or getattr(session, "lease", None) is not None:
+        return
+    if getattr(session, "hub", None) is not None or getattr(session, "shell", None) is None:
+        return
+    session.lease = Mps3BoardLease(session)
+
+
 def make_lease_adapter(session: Any) -> Any:
     """The pack hook ``board_lease:make_lease_adapter``: ``session.lease``. Behind a hub,
     ``session.hub`` itself (the hub's lease already does this); else ``Mps3BoardLease`` when the
@@ -594,4 +627,4 @@ def make_lease_adapter(session: Any) -> Any:
 
 __all__ = ["AnswerNote", "BoardGrant", "BoardLeaseClient", "FEATURE", "ModeResult",
            "Mps3BoardLease", "NO_KEY_WORDS", "RequestNote", "make_lease_adapter",
-           "taken_from_history"]
+           "taken_from_history", "upgrade_session"]

@@ -414,7 +414,13 @@ def _lease_server(ctx: Ctx) -> tuple[Any, Any]:
     pack = load_packs().get(cand.pack)          # the installed pack (a daemon engine's are remote)
     for name in ("lease_for", "hub_for"):
         fn = getattr(pack, name, None)
-        server = fn(cand) if callable(fn) else None
+        if not callable(fn):
+            continue
+        try:
+            # a bare address carries no features: let the pack ask the board once
+            server = fn(cand, ask=True) if name == "lease_for" else fn(cand)
+        except TypeError:
+            server = fn(cand)
         if server is not None:
             return cand, server
     return cand, None
@@ -949,8 +955,16 @@ def _lease_mode(ctx: Ctx, cand: Any, server: Any) -> int:
         f"Switch {name} to one person at a time? You take the lease now. Someone at the board "
         "can always switch it off on the touchscreen." if want else
         f"Switch {name} back to shared? Anyone with a key can use it again.")
-    out = server.client.set_mode(want, take=want, confirm_board=a.confirm_board)
-    out = out if isinstance(out, dict) else {}
+    done = server.client.set_mode(want, take=want, confirm_board=a.confirm_board)
+    out = done if isinstance(done, dict) else {}
+    svc = _service()
+    token = getattr(done, "token", "") if getattr(done, "granted", False) else ""
+    if token and callable(getattr(svc, "adopt", None)):
+        # keep the lease the board granted in this step, as `lease acquire` keeps its own
+        out = svc.adopt(server, board_id=cand.board_id, token=token, heartbeat=False,
+                        expires_at=getattr(done, "expires_at", ""))
+    elif not want and callable(getattr(svc, "drop_stored", None)):
+        svc.drop_stored(server, board_id=cand.board_id)
     after = lease_backend.mode_of(server)
     shown = mode_json(after) or {"single_user": want}
     human = [f"{name}: one person at a time; you hold the lease" if want else

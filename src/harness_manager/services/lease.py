@@ -118,6 +118,7 @@ import socket
 import sys
 import threading
 import time
+import types
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
@@ -1573,6 +1574,7 @@ class LeaseService:
                                  "server": None, "mode": None}
         if hub is None:
             return empty
+        self._bind_token_source(hub)
         kind = lease_backend.kind_of(hub)
         server = {"kind": kind, "host": hub.host,
                   "name": str(getattr(hub, "name", "") or "")}
@@ -1580,7 +1582,10 @@ class LeaseService:
         mode_d = asdict(mode) if mode is not None else None
         if mode is not None and not mode.single_user:
             off = lease_backend.WORDS[kind]["mode_off"]
+            # Our lease may have just ended at the touchscreen: the banner outlives the mode.
+            taken = self.store.get_taken(hub.host, hub.target)
             return {**empty, "hub": hub.host, "board": None, "server": server, "mode": mode_d,
+                    "taken": {**taken, "at": iso_norm(taken.get("at"))} if taken else None,
                     "notes_reason": off, "revoke_reason": off, "background_reason": off}
         if cached_only:
             with self._mu:
@@ -1835,6 +1840,7 @@ class LeaseService:
         and 3600 s."""
         hub = self.require_server(hub, board_id)
         self._need_mode(hub, board_id)
+        self._bind_token_source(hub)
         self._board_for(hub, board_id)
         if ttl_s is None:
             ttl_s = hub_lease_ttl(hub)
@@ -1907,6 +1913,48 @@ class LeaseService:
         else:
             self.store.drop_origin(hub.host, hub.target)     # not ours: forget any older note
         return record
+
+    def _bind_token_source(self, hub: Any) -> None:
+        """A board lease client keeps its token in memory; the store is where it survives a
+        restart. Hand the client a way to read it (hubs have no such hook: their token is
+        passed on each call)."""
+        bind = getattr(getattr(hub, "client", None), "use_token_source", None)
+        if not callable(bind):
+            return
+        host, target = hub.host, hub.target
+
+        def source() -> str:
+            stored = self.store.get(host, target)
+            return stored.token if stored is not None else ""
+
+        bind(source)
+
+    def adopt(self, hub: Any, *, board_id: str = "", token: str, expires_at: str = "",
+              ttl_s: int | None = None, holder: str | None = None,
+              heartbeat: bool = True) -> dict[str, Any]:
+        """Keep a lease the board granted outside ``acquire`` (single-user mode switched on
+        with ``take``): store it as ``acquire`` would, heartbeat it, tell the page."""
+        hub = self.require_server(hub, board_id)
+        self._bind_token_source(hub)
+        self._board_for(hub, board_id)
+        holder = holder or hub_holder(hub)
+        ttl_s = ttl_s or hub_lease_ttl(hub)
+        record = self._store_grant(hub, holder, types.SimpleNamespace(token=token), expires_at,
+                                   ttl_s)
+        self._emit(board_id, hub, "held", record.principal or holder, expires_at, source="acquire")
+        if heartbeat:
+            self.track(board_id, hub, announced=True)
+        return {"lease": record.public(board=self.board_of(hub, ask=False))}
+
+    def drop_stored(self, hub: Any, *, board_id: str = "") -> None:
+        """The board ended our lease (single-user mode switched off): forget the token."""
+        if hub is None:
+            return
+        self.store.drop(hub.host, hub.target)
+        self.untrack(board_id)
+        with self._mu:
+            self._here.pop(_hk(hub), None)
+        self.forget(hub)
 
     def acquired_here(self, hub: Any) -> bool:
         """True when the lease stored for this hub target was taken by this kind of process
@@ -2437,6 +2485,7 @@ class LeaseService:
         and watch the requests for it while we hold it."""
         if hub is None:
             return
+        self._bind_token_source(hub)
         self._board_for(hub, board_id)
         with self._mu:
             self._hubs[board_id] = hub
@@ -2515,7 +2564,9 @@ class LeaseService:
             log.warning("lease heartbeat for %s: %s", board_id, exc.message)
             self._emit(board_id, tr.hub, state if state in ("expired", "lost") else "lost",
                        stored.principal or stored.holder)
-            if state != "expired":
+            # A board in single-user mode that was switched off at the touchscreen answers the
+            # heartbeat "nobody holds it" (expired) though it ended our lease: read its history.
+            if state != "expired" or lease_backend.kind_of(tr.hub) == lease_backend.KIND_BOARD:
                 self._check_taken(board_id, tr.hub, stored, self._holder_now(tr.hub))
             return
         except HarnessError as exc:
