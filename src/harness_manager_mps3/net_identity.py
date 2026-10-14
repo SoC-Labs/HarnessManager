@@ -697,7 +697,10 @@ class Mps3NetIdentity:
         reset_guard.check(self._session, reset_guard.ACTION_HARNESS_REBOOT)
         shell = self._shell()
         try:
-            resp = shell.call(lambda c: c.reboot())
+            from . import claim_route
+
+            resp = claim_route.routed_call(self._session, "restarting the harness", shell,
+                                           lambda c: c.reboot())
         except HeldError as exc:
             busy = card_job_refusal(self._session, exc)
             if busy is None:

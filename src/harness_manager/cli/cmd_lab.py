@@ -59,17 +59,37 @@ def _known(name: str) -> tuple[str, ...] | None:
     return tuple(value) if value else None
 
 
+class _Routed:
+    """The session's shell for the lab verbs. ``call(fn, what)`` is a verb that changes the
+    board: from board image v2.2 a claimed board takes it from itself only, so it rides the
+    claim forward when this Harness Manager holds the claim, is refused in plain words when
+    someone else does, and goes straight otherwise (``claim_route``). ``read(fn)`` is a read,
+    always direct (reads stay open on a claimed board)."""
+
+    def __init__(self, session: Any, shell: Any) -> None:
+        self.session = session
+        self.shell = shell
+
+    def read(self, fn: Any) -> Any:
+        return self.shell.call(fn)
+
+    def call(self, fn: Any, what: str = "this lab verb") -> Any:
+        from harness_manager_mps3 import claim_route
+
+        return claim_route.routed_call(self.session, what, self.shell, fn)
+
+
 def cmd_lab(ctx: Ctx) -> int:
     action = ctx.args.lab_cmd
     with ctx.board() as (cand, session):
-        shell = _shell(ctx, session)
+        shell = _Routed(session, _shell(ctx, session))
         return {"link": _link, "display": _display, "macgen": _macgen, "dutrx": _dutrx}[action](
             ctx, cand.board_id, shell)
 
 
 def _link(ctx: Ctx, board_id: str, shell: Any) -> int:
     event = ctx.args.event
-    resp = shell.call(lambda c: c.link(event))
+    resp = shell.call(lambda c: c.link(event), f"the link {event} event")
     if not resp.ok:
         raise ActionFailedError(f"the shell refused link event {event!r}",
                                 hint="events: up, down, pulse")
@@ -82,7 +102,7 @@ def _link(ctx: Ctx, board_id: str, shell: Any) -> int:
 def _display(ctx: Ctx, board_id: str, shell: Any) -> int:
     owner = ctx.args.owner
     if owner == "query":
-        resp = shell.call(lambda c: c.display_owner())
+        resp = shell.read(lambda c: c.display_owner())
         if not resp.ok:
             raise _declined(_cap(ctx, CAP_DISPLAY), resp.err, "CLCD KVM")
         data = {"board_id": board_id, "requested": "query", "owner": resp.owner,
@@ -91,7 +111,8 @@ def _display(ctx: Ctx, board_id: str, shell: Any) -> int:
                         human=[f"display    owned by {resp.owner}"]))
         return ExitCode.OK
     timeout = ctx.args.timeout
-    resp = shell.call(lambda c: c.display_settled(owner, timeout=timeout))
+    resp = shell.call(lambda c: c.display_settled(owner, timeout=timeout),
+                      f"giving the panel to {owner}")
     if not resp.ok:
         raise _declined(_cap(ctx, CAP_DISPLAY), resp.err, "CLCD KVM")
     data = {"board_id": board_id, "requested": resp.requested, "owner": resp.owner,
@@ -113,7 +134,8 @@ def _macgen(ctx: Ctx, board_id: str, shell: Any) -> int:
     known = _known("MACGEN_INJECTS")
     if known is not None and a.inject not in known:
         raise UsageError(f"unknown inject {a.inject!r}", hint=f"known: {', '.join(known)}")
-    resp = shell.call(lambda c: c.macgen(gen=a.gen, chk=a.chk, inject=a.inject))
+    resp = shell.call(lambda c: c.macgen(gen=a.gen, chk=a.chk, inject=a.inject),
+                      "the MAC generator request")
     if not resp.ok:
         raise ActionFailedError("the shell refused the macgen request",
                                 hint="check `harness-manager info TARGET` (the gen/checker block)")
@@ -138,7 +160,7 @@ def _dutrx(ctx: Ctx, board_id: str, shell: Any) -> int:
                 break
         return out
 
-    got = shell.call(read)
+    got = shell.call(read, "reading the DUT's frames")
     last = got[-1][1]
     if not last.ok:
         raise _declined(_cap(ctx, CAP_DUT_EGRESS), last.err, "DUT egress capture")

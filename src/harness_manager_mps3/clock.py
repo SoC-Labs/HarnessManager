@@ -38,6 +38,8 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.model import Reading
 
+from . import claim_route
+
 PRESET_MHZ = {25.0: "25mhz", 50.0: "50mhz", 100.0: "100mhz"}
 FIXED = "fixed by the shell"
 #: The reading's reason on a Linux board (the CLI's line: "dut  50 MHz  [pin-model]  (…)").
@@ -125,7 +127,9 @@ class Mps3Clocks:
                 f"{mhz} MHz is not a preset on this firmware",
                 hint=f"presets: {allowed} MHz (any frequency needs release item A8)",
             )
-        resp = self._session.shell.call(lambda c: c.set_clk(preset, presets=DEFAULT_CLK_PRESETS))
+        resp = claim_route.routed_call(self._session, f"setting the DUT clock to {preset}",
+                                       self._session.shell,
+                                       lambda c: c.set_clk(preset, presets=DEFAULT_CLK_PRESETS))
         if not resp.ok:
             raise ActionFailedError(f"shell refused set_clk {preset}")
         if not resp.locked:
