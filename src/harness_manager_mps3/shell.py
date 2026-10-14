@@ -67,7 +67,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.model import BoardIdentity, Check, Health
 
-from . import claim_route, ctlgate
+from . import claim_route, ctlgate, slot_words
 from . import identify as _identify
 from .capabilities import HARNESS_STATES
 from .constants import (
@@ -897,7 +897,8 @@ class Mps3Shell:
                                                       str(tap.last.get("code") or "")))
         if ok:
             return
-        if claim_route.is_locked(err, code):      # v2.2: reset is claim-locked (claim_route)
+        if claim_route.is_locked(err, code) or slot_words.is_claim_lost(err, code):
+            # v2.2: reset is claim-locked (claim_route); a lost claim is final (no retry)
             raise claim_route.LockedReply(err, code)
         if any(e in err.lower() for e in _BAD_TARGET_ERRS):
             raise UsageError(f"this harness does not accept reset target {target!r} ({err})",

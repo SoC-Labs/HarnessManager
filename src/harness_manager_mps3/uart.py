@@ -51,6 +51,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 
+from . import slot_words
 from .constants import CONSOLE_PORTS, HOSTIO_CONSOLE, KNOWN_DESIGNS
 from .designs import DESIGNS
 
@@ -419,7 +420,8 @@ def hostio_set_mode(session: Any, mode: str) -> dict[str, Any]:
         reply = via_board()
     else:
         reply = shell.call_raw(lambda client, _tap: client.hostio_set_mode(mode))
-        if reply.get("ok") is not True and str(reply.get("code") or "") == "locked":
+        if reply.get("ok") is not True and str(reply.get("code") or "") == "locked" \
+                and not slot_words.is_claim_lost(str(reply.get("err") or ""), "locked"):
             route(claimed=True)
             reply, how = via_board(), "board-ssh"
     if reply.get("ok") is not True:

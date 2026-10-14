@@ -170,11 +170,44 @@ CLAIM_LOCK_HINT = ("the board's SSH is claimed (the claim lock, not the identity
                    "board claim-status TARGET`")
 
 
+#: The card-less board after a warm restart (net-protocol v0.20 "Card-less boards"): err
+#: ``<verb> locked: claim lost on reboot (re-claim on the serial console)``, code ``locked``.
+#: This marker is the ONE place Harness Manager reads the err text: a sub-case of ``locked``.
+CLAIM_LOST_MARKER = "claim lost on reboot"
+LOST_CLAIM_WORDS = ("The board lost its claim when it restarted (it has no card to keep it). "
+                    "Re-claim it from the board's serial console, then adopt it here "
+                    "(Board \u2192 Access \u2192 Adopt this board).")
+LOST_CLAIM_HINT = ("on the board's serial console: `mps3-reclaim KEYFILE`; then adopt it here: "
+                   "`harness-manager board claim TARGET --adopt`, or Board \u2192 Access \u2192 "
+                   "Adopt this board")
+
+
+def is_claim_lost(err: str, code: str = "") -> bool:
+    """The claim-lost-on-reboot refusal: ``code`` locked (or no code, an old line) and the
+    marker in the err. The tunnel cannot help: the claim is gone."""
+    if code and code != "locked":
+        return False
+    return CLAIM_LOST_MARKER in (err or "").lower()
+
+
 def is_claim_lock(err: str, code: str = "") -> bool:
+    """The claim lock, a claim that can be used through the tunnel: by ``code`` when the reply
+    has one (``locked``), else by its text (an image before the codes). NOT the lost claim
+    (``is_claim_lost``): that one is not retried."""
+    if is_claim_lost(err, code):
+        return False
     if code:
         return code == "locked"
     low = (err or "").strip().lower()
     return low.startswith("slot locked") or "board claimed" in low
+
+
+def lost_claim_error(err: str = "", what: str = "") -> ClaimLockedError:
+    """The lost claim as the error Harness Manager shows: the plain words, no retry."""
+    exc = ClaimLockedError(LOST_CLAIM_WORDS + (f" [harness: {err}]" if err else ""),
+                           hint=LOST_CLAIM_HINT)
+    exc.claim_lost = True                          # type: ignore[attr-defined]
+    return exc
 
 
 # --- a slot act's refusal, and a failed card job ------------------------------------------------
@@ -198,6 +231,8 @@ def refusal(act: str, err: str, code: str = "", st: Any = None) -> HarnessError:
         return HeldError(f"slot {act}: the board's card is busy (EBUSY)",
                          hint="a push or a verify is running (a verify holds the card for "
                               "minutes); wait for it: `harness-manager slot status TARGET`")
+    if is_claim_lost(err, c):
+        return lost_claim_error(err)
     if is_claim_lock(err, c):
         return ClaimLockedError(f"slot {act}: {err or 'locked'}", hint=CLAIM_LOCK_HINT)
     if c == "identity_lock" or (not c and identity_lock_reason(err) is not None):

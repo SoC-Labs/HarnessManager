@@ -225,7 +225,9 @@ def test_twin_without_claimed_the_adapter_asks_identify_then_probes(make, monkey
     monkeypatch.setattr(shellmod, "identify_quietly", lambda *a, **k: asked.append(a))
     fake.slot_acts.clear()
     assert session.os_slots.claimed() is True
-    assert asked and "rollback" in fake.slot_acts           # the no-op guarded lock probe
+    # the no-op guarded lock probe (rollback): the REAL gate (rc2) refuses it at dispatch, before
+    # the slot handler, so the board's own act list never sees it; the gate's record does
+    assert asked and any(op == "slot" for op, _peer in fake.gated)
 
 
 def test_the_slot_feature_is_matched_by_name_on_any_harness(make):

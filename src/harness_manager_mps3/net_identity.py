@@ -240,7 +240,8 @@ def set_error(reply: Mapping[str, Any], what: str = "identity_set") -> HarnessEr
         return UsageError(f"the board refused the identity: {err or 'invalid'}; nothing was "
                           "changed", hint=f"label: 1-{BI.LABEL_MAX} of A-Z, 0-9 and -; ip: "
                                           "a.b.c.d/nn (nn 8-30); mac: unicast, non-zero")
-    if code == "locked" or slot_words.is_claim_lock(err, code):
+    if code == "locked" or slot_words.is_claim_lock(err, code) \
+            or slot_words.is_claim_lost(err, code):
         from harness_manager.services.claim import lock_error
 
         return lock_error(err, what)

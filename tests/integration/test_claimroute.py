@@ -189,15 +189,29 @@ def test_twin_a_swap_refused_for_someone_elses_claim_is_the_claims_refusal(gate,
     assert sent(rig, "swap") == [HUB_SIDE] and rig.ssh.board_launches() == []
 
 
-def test_the_design_push_and_tftp_are_refused_from_the_pc(gate):
+@pytest.mark.parametrize("kind", [0, 1, 2])
+def test_the_design_push_is_closed_unread_from_the_pc(gate, kind):
+    """The REAL gate (rc2): 6910 header of any kind from a non-local peer: closed, no line."""
     import socket
 
     rig = gate(observed=True)
+    header = b"MPS3" + bytes([0, 0, kind]) + b"\0" * 17
     with socket.create_connection(("127.0.0.1", rig.fake.raw_tcp_port), timeout=2) as s:
-        s.sendall(b"\0" * 24)
-        s.settimeout(2)
-        got = s.recv(200)
-    assert b"locked: board claimed" in got and ("push", HUB_SIDE) in rig.fake.gated
+        s.sendall(header)
+        s.shutdown(socket.SHUT_WR)               # the board drains until the peer is done
+        s.settimeout(5)
+        assert s.recv(200) == b""                # closed unread: nothing to read
+
+
+def test_a_tftp_write_is_refused_from_the_pc_before_ack_0(gate):
+    import socket
+
+    rig = gate(observed=True)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as u:
+        u.settimeout(5)
+        u.sendto(b"\x00\x02design.bin\x00octet\x00", ("127.0.0.1", rig.fake.tftp_port))
+        pkt, _ = u.recvfrom(600)
+    assert pkt[:4] == b"\x00\x05\x00\x02" and b"access violation" in pkt   # ERROR 2, not ACK
 
 
 # --- card-less boards ----------------------------------------------------------------------------
@@ -216,7 +230,8 @@ def test_a_board_that_lost_its_claim_on_restart_says_so_and_is_not_claimed_again
     st = status_of(rig)
     assert st["state"] == "unclaimed"
     assert st["lost"]["message"] == LOST_CLAIM_WORDS
-    assert "from this PC" in LOST_CLAIM_WORDS and LOST_CLAIM_WORDS in st["notes"]
+    assert "serial console" in LOST_CLAIM_WORDS and "Adopt this board" in LOST_CLAIM_WORDS
+    assert "from this PC" not in LOST_CLAIM_WORDS and LOST_CLAIM_WORDS in st["notes"]
     assert CL.ClaimRecords().get(rig.board_id).get("key_fp") == before.get("key_fp")
     assert rig.ssh.board_launches() == [] and rig.fake.ssh_claimed is False   # nothing re-claimed
 
