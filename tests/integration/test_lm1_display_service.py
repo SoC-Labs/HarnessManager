@@ -750,3 +750,69 @@ def test_the_boards_own_bytes_through_the_compositor(svc: DisplayService) -> Non
         v.close()
     finally:
         board.close()
+
+
+# --- R3 / L9: a keyframe restarted by a redaction toggle ---------------------------------------------
+
+
+class _RestartBoard(_VectorBoard):
+    """On KEY: a PARTIAL keyframe (key_first, no key_last, a wrong tile), then the board's
+    real split keyframe re-sequenced behind it, as when redaction toggles mid-keyframe."""
+
+    def _run(self) -> None:
+        try:
+            conn, _ = self.srv.accept()
+        except OSError:
+            return
+        with conn:
+            conn.sendall((self.DIR / "hello.bin").read_bytes())
+            buf = bytearray()
+            while True:
+                try:
+                    data = conn.recv(4096)
+                except OSError:
+                    return
+                if not data:
+                    return
+                buf += data
+                while len(buf) >= 8:
+                    _m, typ, _r, ln = w.HEADER.unpack_from(buf)
+                    if len(buf) < 8 + ln:
+                        break
+                    body = bytes(buf[8:8 + ln])
+                    del buf[:8 + ln]
+                    if typ == w.T_KEY:
+                        parts = [(self.DIR / p).read_bytes() for p in self.key["parts"]]
+                        first = w.parse_update(parts[0][8:])
+                        seq = first.seq
+                        bogus = w.update_msg(
+                            seq, 0, 0, 0, w.S_KEY | w.S_KEY_FIRST, 0, w.valid_bytes([0]),
+                            [w.record(0, w.E_FILL, b"\xff\xff")], regs=first.regs)
+                        conn.sendall(bogus)
+                        for i, raw in enumerate(parts):          # seqs continue behind the bogus
+                            b = bytearray(raw)
+                            b[8:12] = w.U32.pack(seq + 1 + i)
+                            conn.sendall(bytes(b))
+                    elif typ == w.T_PING:
+                        conn.sendall(w.pong_msg(w.U32.unpack(body)[0]))
+                    elif typ == w.T_RATE:
+                        conn.sendall(w.message(w.T_RATE, bytes([min(30, body[0])])))
+                    elif typ == w.T_ACK:
+                        self.acks.append(w.U32.unpack(body)[0])
+
+
+def test_a_restarted_keyframe_drops_the_partial_and_shows_the_second(svc: DisplayService) -> None:
+    board = _RestartBoard()
+    try:
+        vm = ViewerModel()
+        v = svc.attach(BID, board.connect)
+        wait_for(lambda: svc.status(BID)["state"] == "live", what="the second keyframe presented")
+        c = svc.status(BID)["counters"]
+        assert c["key_restarts"] == 1 and c["protocol_errors"] == 0 and c["gaps"] == 0
+        assert c["keys_presented"] == 1                      # never the half frame
+        assert zlib.crc32(svc.picture(BID).rgb565) == board.key["frame_crc"]
+        vm.pump(v)
+        assert vm.keys == 1 and zlib.crc32(bytes(vm.frame)) == board.key["frame_crc"]
+        v.close()
+    finally:
+        board.close()

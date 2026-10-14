@@ -331,7 +331,8 @@ class _Board:
         self._last_event: tuple[Any, ...] | None = None
         self.stats = {"connects": 0, "updates": 0, "acks_sent": 0, "keys_sent": 0,
                       "keys_presented": 0, "deltas_presented": 0, "gaps": 0, "refusals": 0,
-                      "protocol_errors": 0, "ignored": 0, "pongs": 0}
+                      "protocol_errors": 0, "ignored": 0, "pongs": 0,
+                      "key_restarts": 0}
         self.thread = threading.Thread(target=self._run, daemon=True,
                                        name=f"display-{board_id}")
 
@@ -675,6 +676,8 @@ class _Board:
                     last_seq = u.seq
                     if u.key:
                         if u.key_first:
+                            if staging is not None:              # L9: redaction toggled mid-keyframe
+                                self.stats["key_restarts"] += 1  # drop the partial, start this one
                             staging, staged_n = [u], len(u.tiles)
                         elif staging is not None:
                             staging.append(u)
