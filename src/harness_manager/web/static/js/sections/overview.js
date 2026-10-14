@@ -24,10 +24,11 @@ import {
   boardState, cardJobBusy, changed, hasCardStore, loadCard, loadOverlays, loadTelemetry, navigate,
   onBoardEvent, openActivity, quietWords, refreshInfo, S,
 } from "../store.js";
+import { LEASE_WORDS } from "../lease_words.js";
 import { Chip, Icon, MiniBar, QuietNote, Reason, ResultBlock, Spinner } from "../ui.js";
 import { panelState } from "../actions.js";
 import {
-  consoleRows, durationText, epochOf, leaseLeft, leaseWhere, leaseWho, loadClocks, onHubLoaded, week,
+  consoleRows, durationText, epochOf, leaseLeft, leaseWhere, leaseWho, loadClocks, onHubLoaded, serverWord, week,
 } from "../week.js";
 import { checksOf } from "./checks.js";
 import { front, FrontPanelCard, readPanelNow } from "./panel.js";
@@ -264,7 +265,7 @@ export function attentionItems(bid) {
       fix: go("board/connections", "Connections") });
   }
   if (who.state === "unknown") {
-    out.push({ key: "lease", level: "unk", title: `The lease on ${who.host || "the hub"} could not be read.`,
+    out.push({ key: "lease", level: "unk", title: `The lease on ${who.host || serverWord(who)} could not be read.`,
       text: ` ${sentence(who.error)} It may be held: not known is not free. The page reads it again every 30 s.` });
   }
   const w = waitingForYou(bid);
@@ -272,15 +273,15 @@ export function attentionItems(bid) {
     const first = w.first;
     const since = epochOf(first.since);
     out.push({ key: "waiting", level: "warn", title: `${waitWords(w)}:`,
-      text: ` release when you're done. The hub hands it to ${whoParts(first.holder).who} at once.`,
-      more: `#${first.position} in the hub's queue${since ? ` since ${hhmm(since)}` : ""}${first.message ? `: “${first.message}”` : ""}. Close board… restores the baseline and releases.`,
+      text: ` release when you're done. ${cap(serverWord(who))} hands it to ${whoParts(first.holder).who} at once.`,
+      more: `#${first.position} in ${serverWord(who) === LEASE_WORDS.serverBoard ? "the board's" : "the hub's"} queue${since ? ` since ${hhmm(since)}` : ""}${first.message ? `: “${first.message}”` : ""}. Close board… restores the baseline and releases.`,
       fix: { label: "Close board…", run: () => closeBoardDialog(bid) } });
   }
   if (who.state === "here") {
     const left = leaseLeft(who.lease);
     if (left !== null && left <= 600) {
       out.push({ key: "lease", level: "warn", title: `Your lease ends in ${durationText(left)}.`,
-        text: ` At ${hhmm(epochOf(who.lease.expires_at))} Program, Reset DUT and debug stop working here. The service renews it while the board is open; if this stays, the hub is not answering.`,
+        text: ` At ${hhmm(epochOf(who.lease.expires_at))} Program, Reset DUT and debug stop working here. The service renews it while the board is open; if this stays, ${serverWord(who)} is not answering.`,
         fix: { label: "Close board…", run: () => closeBoardDialog(bid) } });
     }
   }
@@ -792,15 +793,17 @@ function ChecksLine({ bid }) {
   return html`<span class="secondary">no runs on this board</span>`;
 }
 
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
 function leaseChip(who) {
   const left = leaseLeft(who.lease);
   const leftText = left !== null ? ` · ${durationText(left)}` : "";
   const where = leaseWhere(who);
   switch (who.state) {
-    case "here": return { level: "accent", icon: "user", text: `Yours${leftText}`, title: `Your hub lease: ${where}, held by this Harness Manager` };
+    case "here": return { level: "accent", icon: "user", text: `Yours${leftText}`, title: `Your ${serverWord(who) === LEASE_WORDS.serverBoard ? "board" : "hub"} lease: ${where}, held by this Harness Manager` };
     case "free": return { level: "plain", icon: "lock-open", text: "Free", title: `Free: nobody holds ${where}` };
     case "elsewhere": return { level: "held", icon: "lock", text: `Held by you in another session${leftText}`, title: `${who.holder}: ${where}; your hub name, but not this Harness Manager` };
-    case "unknown": return { level: "unk", icon: "circle-help", text: "Lease unknown", title: `${where}: ${who.error || "the hub did not answer"}` };
+    case "unknown": return { level: "unk", icon: "circle-help", text: "Lease unknown", title: `${where}: ${who.error || `${serverWord(who)} did not answer`}` };
     case "unread": return { level: "unk", icon: "circle-help", text: "Reading the lease…", title: "" };
     default: return { level: "held", icon: "lock", text: `Held by ${whoParts(who.holder).who}${leftText}`, title: `${who.holder} holds ${where}` };
   }
@@ -825,8 +828,14 @@ function LeaseCard({ bid }) {
     const holder = row.holder;
     return html`<${OvCard} title="Access" icon="ethernet-port" testid="ov-access"
         go=${html`<${Go} label="Board" action="ov-go-about" title="About this board" run=${() => navigate(bid, "board/about")} />`}>
-      <div class="ov-lease-top"><${Chip} icon="lock-open" cls="ov-chip-sm plain">No hub lease<//>
-        <span class="small secondary">a desk board on this network</span></div>
+      ${(() => {
+        const lm = week(bid).leaseMode;
+        const shared = !!(lm && lm.available);          // the board can do single-user mode: it is shared now
+        return html`<div class="ov-lease-top"><${Chip} icon="lock-open" cls="ov-chip-sm plain">${shared ? LEASE_WORDS.ovShared : "No hub lease"}<//>
+          <span class="small secondary">${shared ? `· ${LEASE_WORDS.ovSharedSub}` : LEASE_WORDS.ovSharedSub}</span>
+          ${shared ? html`<button type="button" class="link" data-action="ov-single-user" data-testid="ov-single-user-link"
+            onClick=${() => navigate(bid, "board/access")}>${LEASE_WORDS.ovOneLink}</button>` : null}</div>`;
+      })()}
       <dl class="ov-kv">
         <dt>Who drives</dt><dd title="Source: this app's board lock (one session: this page and the CLI share it)" data-testid="ov-who-drives">
           ${holder ? html`whoever has it open: <b>${holder.user || "?"}</b>${holder.host ? html` <span class="muted">on ${holder.host}</span>` : null}` : "whoever has it open"}</dd>
@@ -847,19 +856,20 @@ function LeaseCard({ bid }) {
   let wait = null;
   if (w) {
     const since = epochOf(w.first.since);
-    wait = html`<div class="ov-wait" data-testid="ov-wait" title=${`#${w.first.position}${since ? ` since ${hhmm(since)}` : ""}${w.first.message ? `: “${w.first.message}”` : ""}. When you release, the hub hands the lease to ${whoParts(w.first.holder).who} at once.`}>
+    wait = html`<div class="ov-wait" data-testid="ov-wait" title=${`#${w.first.position}${since ? ` since ${hhmm(since)}` : ""}${w.first.message ? `: “${w.first.message}”` : ""}. When you release, ${serverWord(who)} hands the lease to ${whoParts(w.first.holder).who} at once.`}>
       <${Icon} name="triangle-alert" /><span><b>${waitWords(w)}:</b> release when you're done.
       <button type="button" class="link" data-action="ov-release" onClick=${(e) => openReleaseConfirm(bid, e.currentTarget)}>Give back…</button></span></div>`;
   } else if ((who.state === "other" || who.state === "elsewhere") && firstOther) {
     const nm = whoParts(firstOther.holder).who;
-    wait = html`<div class="ov-wait info" data-testid="ov-wait" title="The hub promotes the next person the moment the lease frees">
+    wait = html`<div class="ov-wait info" data-testid="ov-wait" title=${`${cap(serverWord(who))} promotes the next person the moment the lease frees`}>
       <${Icon} name="info" /><span><b>${firstOther.mine ? `You wait, #${firstOther.position}` : `${nm} waits`}${firstOther.want_s ? ` (${wantText(firstOther.want_s)})` : ""}</b>: ${firstOther.mine ? (firstOther.position === 1 ? "you get" : "your turn comes after the others") : "gets"}${firstOther.mine && firstOther.position !== 1 ? "" : ` it when ${whoParts(who.holder).who} releases`}${exp ? ` (the lease runs to ${hhmm(exp)})` : ""}.</span></div>`;
   }
-  const stale = who.stale ? `the hub did not answer the last read; last confirmed ${hhmm(epochOf(who.stale.confirmed_at))}` : "";
+  const stale = who.stale ? `${serverWord(who)} did not answer the last read; last confirmed ${hhmm(epochOf(who.stale.confirmed_at))}` : "";
   return html`<${OvCard} title="Lease" icon="lock" testid="ov-lease"
       go=${html`<${Go} label="Checks" action="ov-go-checks" title="Unattended runs on the Checks tab" run=${() => navigate(bid, "checks")} />`}>
     <div class="ov-lease-top" data-testid="tile-lease" data-lease=${who.state}
-        title=${`Source: the hub${who.host ? ` (${who.host})` : ""}: the lease and its queue${stale ? `; ${stale}` : ""}`}>
+        title=${who.hub && who.hub.server && who.hub.server.kind === "board" ? `${LEASE_WORDS.ovSourceBoard}${stale ? `; ${stale}` : ""}`
+          : `Source: the hub${who.host ? ` (${who.host})` : ""}: the lease and its queue${stale ? `; ${stale}` : ""}`}>
       <${Chip} level=${c.level} icon=${c.icon} cls="ov-chip-sm" title=${c.title} testid="ov-lease-chip">${c.text}<//>
       ${until ? html`<span class="small secondary ov-ell">${until}</span>` : null}</div>
     ${wait}

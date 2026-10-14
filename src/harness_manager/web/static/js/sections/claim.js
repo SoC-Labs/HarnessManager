@@ -9,8 +9,11 @@ import { gateReason, interlock, isArmed, runJob, setArmed } from "../actions.js"
 import { call, toApiError } from "../api.js";
 import { html, useEffect, useState } from "../lib.js";
 import { boardState, refreshInfo } from "../store.js";
-import { ArmBox, Card, Chip, Icon, Reason, Spinner } from "../ui.js";
-import { openModal } from "../modal.js";
+import { ArmBox, Card, Chip, Icon, Reason, Seg, Spinner } from "../ui.js";
+import { ModalShell, openModal, registerModal, setModalBusy } from "../modal.js";
+import { LEASE_WORDS as W } from "../lease_words.js";
+import { leaseBoardName, forceName, nameMatches } from "../lease.js";
+import { leaseWho, loadHub, loadLeaseMode, week } from "../week.js";
 import { clearNamePrefill, hasNamePrefill, namePrefillArgs } from "../name_prefill.js";
 
 // The daemon stamps times in UTC ("2026-10-13T09:30:00Z"); people read their own clock.
@@ -43,7 +46,12 @@ const hubAsked = new Map();
 export function hubRouted(c) { return !!c && String(c.route || "").startsWith("hub "); }
 
 // Only a Linux harness has a claim (info.claim is absent on bare metal): nothing shows then.
+// The SSH claim card, then "Who can use this board" (the board's single-user mode).
 export function ClaimCard({ bid }) {
+  return html`<${SshClaimCard} bid=${bid} /><${SingleUserCard} bid=${bid} />`;
+}
+
+function SshClaimCard({ bid }) {
   const b = boardState(bid);
   const c = claimOf(b);
   const [armed, setClaimArmed] = useState(false);
@@ -356,3 +364,99 @@ function KeysBlock({ bid, why }) {
       text=${`${err.errName}: ${err.message}${err.hint ? ` (${err.hint})` : ""}`} />` : null}
   </div>`;
 }
+
+
+// --- Board > Access: "Who can use this board" (single-user mode; the board's own lease) -------
+//
+// The board's state, not a setting: every PC sees the same. ON takes the lease in the same step
+// (owner only); OFF is for the owner or the holder, and an owner switching off while someone
+// else holds it types the board's name first.
+
+export function modeLock(b, m, hubBehind) {
+  // The reason the control is off, "" when it can be used.
+  const c = claimOf(b);
+  if (hubBehind) return W.behindHub;
+  if (!m.available) return W.noFeature;
+  if (c && c.state === "unclaimed") return W.unclaimed;
+  if (!m.single_user && m.local_hold_s > 0) return W.localHold(Math.max(1, Math.ceil(m.local_hold_s / 60)));
+  if (!m.can_change) return m.change_reason || (m.single_user ? W.notOwnerOff : W.notOwner);
+  return "";
+}
+
+function SingleUserCard({ bid }) {
+  const b = boardState(bid);
+  const c = claimOf(b);
+  const w = week(bid);
+  useEffect(() => { loadLeaseMode(bid); }, [bid, c && c.state]);
+  if (!c || w.leaseModeUnsupported) return null;
+  const m = w.leaseMode;
+  const hubBehind = hubRouted(c) || !!(w.hub && w.hub.server && w.hub.server.kind === "hub");
+  if (!m) {
+    return html`<${Card} title=${W.cardTitle} icon="lock" testid="access-single-user" sub=${W.cardSub}>
+      ${w.leaseModeError ? html`<${Reason} level="err" text=${w.leaseModeError} />` : html`<${Reason} text=${W.reading} />`}<//>`;
+  }
+  const on = !!m.single_user;
+  const lock = modeLock(b, m, hubBehind);
+  const pick = (v) => {
+    if (lock || (v === "one") === on) return;
+    openModal("lease_mode", { bid, on: v === "one" });
+  };
+  const state = on ? (m.by ? W.stateOneBy(m.by) : W.stateOne) : W.stateShared;
+  return html`<${Card} title=${W.cardTitle} icon="lock" testid="access-single-user" sub=${W.cardSub}>
+    <div class="stack gap-8" data-single-user=${on ? "on" : "off"}>
+      <div aria-disabled=${lock ? "true" : undefined} title=${lock || undefined}
+        style=${lock ? "opacity:.6" : undefined} data-testid="single-user-seg">
+        <${Seg} label=${W.segLabel} value=${on ? "one" : "shared"} onChange=${pick}
+          options=${[{ value: "shared", label: W.segShared }, { value: "one", label: W.segOne }]} />
+      </div>
+      <p class="small secondary" data-testid="single-user-state">${state}</p>
+      <p class="small secondary" data-testid="single-user-help">${W.help}</p>
+      ${on ? html`<${Reason} icon="info" testid="single-user-courtesy" text=${m.label || W.courtesy} />` : null}
+      ${lock ? html`<${Reason} level="warn" testid="single-user-why" text=${lock} />` : null}
+    </div><//>`;
+}
+
+function LeaseModeDialog({ bid, on, close }) {
+  const board = leaseBoardName(bid);
+  const m = (week(bid).leaseMode) || {};
+  const who = leaseWho(bid);
+  const other = !on && (who.state === "other" || who.state === "elsewhere");
+  const typeName = forceName(bid);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const ready = !other || nameMatches(typed, typeName);
+  const go = async () => {
+    if (busy || !ready) return;
+    setBusy(true); setModalBusy(true); setErr("");
+    try {
+      const body = { single_user: on, confirm: true };
+      if (other) body.confirm_board = typed.trim();
+      await runJob("leaseModeSet", { bid }, body, null, "lease_mode");
+      await loadLeaseMode(bid);
+      loadHub(bid);
+      setModalBusy(false);
+      close();
+    } catch (e) {
+      const ae = toApiError(e);
+      setErr(W.failed(ae.message || ae.errName));
+      setBusy(false); setModalBusy(false);
+    }
+  };
+  const title = on ? W.onTitle(board) : other ? W.offForceTitle(board) : W.offTitle(board);
+  const holder = who.holder || "someone else";
+  return html`<${ModalShell} title=${title} icon=${other ? "triangle-alert" : "lock"} cls="small" testid="lease-mode-confirm"
+      foot=${html`<button type="button" class="btn" data-action="lease_mode_cancel" disabled=${busy} onClick=${close}>${W.cancel}</button>
+        <button type="button" class=${`btn ${other ? "danger-solid" : "primary"}`} data-action="lease_mode_confirm"
+          disabled=${busy || !ready} aria-busy=${busy ? "true" : undefined} onClick=${go}>
+          ${busy ? html`<${Spinner} /> ${W.working}` : on ? W.onButton : other ? W.offForceButton : W.offButton}</button>`}>
+    <p data-testid="lease-mode-what">${on ? W.onBody(`${m.ttl_min || 15} min`) : other ? W.offForceBody(holder, board) : W.offBody}</p>
+    ${other ? html`<div><label class="field-label" for="lease-mode-name">${W.offForceLabel}</label>
+      <input id="lease-mode-name" class="input mono force-name" type="text" autocomplete="off" spellcheck="false"
+        data-testid="lease-mode-name" data-autofocus value=${typed}
+        onInput=${(e) => setTyped(e.target.value)}
+        onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } }} /></div>` : null}
+    ${err ? html`<${Reason} level="err" text=${err} testid="lease-mode-error" />` : null}
+  <//>`;
+}
+registerModal("lease_mode", LeaseModeDialog);

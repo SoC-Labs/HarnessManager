@@ -31,15 +31,23 @@ import { leaseSpecs } from "./hub.js";
 import { html, useLayoutEffect, useRef, useState } from "./lib.js";
 import { changed, log, onBoardEvent, S, timed, toast } from "./store.js";
 import {
-  durationText, epochOf, leaseLeft, leaseName, leaseTargetNote, leaseWhere, leaseWho, loadHub,
-  onHubLoaded, scheduleHub, staleNote, week,
+  durationText, epochOf, leaseLeft, leaseName, leaseTargetNote, leaseWhere, leaseWho, loadHub, loadLeaseMode,
+  onHubLoaded, scheduleHub, serverWord, staleNote, week,
 } from "./week.js";
+import { LEASE_WORDS } from "./lease_words.js";
 import { Chip, Icon, MiniBar, Reason, ResultBlock, Seg, Spinner } from "./ui.js";
 
 export const KEEP_MINUTES = [5, 15, 30, 60];
 const NOTE_MAX = 500;                   // characters; a note on the hub is at most 4 KiB
 
 // --- small helpers -----------------------------------------------------------------------------
+
+// A touchscreen break leaves the board shared (no lease server to read): its notice is kept apart.
+function takenOf(bid) {
+  const h = hubOf(bid);
+  const b = S.board[bid];
+  return (h && h.taken) || (b && b.week && b.week.takenBoard) || null;
+}
 
 function hubOf(bid) {
   const b = S.board[bid];
@@ -49,14 +57,14 @@ function hubOf(bid) {
 // T8 hub mode over REST: request notes (the message, Keep) and the right to force.
 export function notesOff(bid) {
   const hub = hubOf(bid);
-  if (hub) return hub.notesOk === false ? (hub.notesReason || "this hub connection carries no request messages") : "";
+  if (hub) return hub.notesOk === false ? (hub.notesReason || `this ${serverWord(bid) === LEASE_WORDS.serverBoard ? "board" : "hub"} connection carries no request messages`) : "";
   const d = FULL[bid] && FULL[bid].data;             // a board that is not open (G3)
   return d && d.notes_supported === false ? (d.notes_reason || "this hub connection carries no request messages") : "";
 }
 
 function revokeOff(bid) {
   const hub = hubOf(bid);
-  return hub && hub.revokeOk === false ? (hub.revokeReason || "force-release needs an admin token on this hub") : "";
+  return hub && hub.revokeOk === false ? (hub.revokeReason || `force-release needs an admin token on ${serverWord(bid) === LEASE_WORDS.serverBoard ? "this board" : "this hub"}`) : "";
 }
 
 // What every lease text calls the board: its name (N1: "mps3-01", from boards.toml, the
@@ -300,7 +308,7 @@ export function LeaseQueueList({ q, compact = false, testid = "lease-queue" }) {
   return html`<div class="lq-list" data-testid=${testid}>
     ${q.people.length ? html`<ol class="lq-rows">${q.people.map(row)}</ol>`
       : html`<div class="lq-none">No interactive requests</div>`}
-    ${q.bots.length ? html`<div class="lq-bg-head" title="Automation (e.g. Checks) waits in the hub's background queue, behind every interactive request">
+    ${q.bots.length ? html`<div class="lq-bg-head" title="Automation (e.g. Checks) waits in the background queue, behind every interactive request">
         <${Icon} name="repeat" cls="sm" />Automation · background queue</div>
       <ol class="lq-rows bg" data-testid=${`${testid}-bg`}>${q.bots.map(row)}</ol>`
       : !q.botsKnown && q.botsReason && !compact ? html`<div class="lq-none" data-testid=${`${testid}-bg-unknown`}>
@@ -382,14 +390,14 @@ function QueuePopOpen({ bid }) {
       : html`<span class="lq-foot-t">Stop that session to hand the board on.</span>`;
   }
   const target = leaseName(who) || leaseBoardName(bid);
-  return html`<div class="lq-pop" role="dialog" aria-label=${`Hub lease queue for ${leaseBoardName(bid)}`} ref=${ref}
+  return html`<div class="lq-pop" role="dialog" aria-label=${`Lease queue for ${leaseBoardName(bid)}`} ref=${ref}
       data-testid="lease-queue-pop">
-    <div class="lq-head"><b>Hub lease queue</b><span class="muted mono">${target}</span>
+    <div class="lq-head"><b>${serverWord(bid) === LEASE_WORDS.serverBoard ? "Board lease queue" : "Hub lease queue"}</b><span class="muted mono">${target}</span>
       <button type="button" class="btn ghost icon-only sm" aria-label="Close the queue" title="Close (Esc)"
         onClick=${() => closePop()}><${Icon} name="x" /></button></div>
     <div class="lq-holder" data-testid="lease-queue-holder"><${Icon} name=${who.state === "here" ? "user" : "lock"} />${holder}</div>
     <${LeaseQueueList} q=${q} />
-    ${notesOff(bid) ? html`<div class="lq-none">${`No messages or times over this hub connection: ${notesOff(bid)}.`}</div>` : null}
+    ${notesOff(bid) ? html`<div class="lq-none">${`No messages or times over this connection: ${notesOff(bid)}.`}</div>` : null}
     ${foot ? html`<div class="lq-foot">${foot}</div>` : null}
   </div>`;
 }
@@ -841,9 +849,13 @@ function HolderPrompts({ bid }) {
 
 // --- the victim ------------------------------------------------------------------------------------
 
+// A touchscreen break (lease.taken by "someone at the board"): the board itself ended the lease.
+export function takenAtBoard(t) { return !!t && t.by === "someone at the board"; }
+
 function takenText(bid, t) {
   const at = epochOf(t.at);
-  return `${leaseBoardName(bid)} was force-released by ${t.by || "another hub user"}${at ? ` at ${clock(at)}` : ""}${t.reason ? `: ${t.reason}` : ""}`;
+  if (takenAtBoard(t)) return LEASE_WORDS.takenAtBoard(leaseBoardName(bid), at ? clock(at) : "");
+  return `${leaseBoardName(bid)} was force-released by ${t.by || "another user"}${at ? ` at ${clock(at)}` : ""}${t.reason ? `: ${t.reason}` : ""}`;
 }
 
 function takenKey(t) { return String((t && (t.at || t.reason)) || ""); }
@@ -861,6 +873,7 @@ function noteTaken(bid, t) {
 // daemon without the route.
 async function dismissTaken(bid, t) {
   L.dismissedTaken[bid] = takenKey(t);
+  if (S.board[bid] && S.board[bid].week) S.board[bid].week.takenBoard = null;
   remember(localStore(), DISMISSED_KEY, L.dismissedTaken);
   changed();
   const r = await timed("lease taken dismiss", () => call("leaseTakenDismiss", { bid }));
@@ -902,13 +915,12 @@ function IdleBanner({ bid }) {
 }
 
 function TakenBanner({ bid }) {
-  const hub = hubOf(bid);
-  const t = hub && hub.taken;
+  const t = takenOf(bid);
   if (!t || L.dismissedTaken[bid] === takenKey(t)) return null;
   return html`<div class="banner err" role="alert" data-testid="lease-taken" data-board=${bid}>
     <${Icon} name="octagon-x" />
     <div class="grow"><strong>${takenText(bid, t)}</strong>
-      <div class="secondary small mt-8">The lease is no longer yours: do not drive the board until you have it again.</div></div>
+      <div class="secondary small mt-8">${takenAtBoard(t) ? LEASE_WORDS.takenAtBoardSub : "The lease is no longer yours: do not drive the board until you have it again."}</div></div>
     <button type="button" class="btn sm" data-action="lease_taken_dismiss" onClick=${() => dismissTaken(bid, t)}>Dismiss</button>
   </div>`;
 }
@@ -949,6 +961,7 @@ function RequestForm() {
   useDialogKeys(ref, closeForm);
   const f = L.form;
   const bid = f.bid;
+  const sw = serverWord(bid);
   const who = leaseView(bid);
   const holder = who.state === "other" || who.state === "elsewhere" ? who.holder : "";
   const left = leaseLeft(who.lease);
@@ -968,9 +981,9 @@ function RequestForm() {
         <button type="button" class="btn ghost sm icon-only" aria-label="Close" tabindex="-1" onClick=${closeForm}><${Icon} name="x" /></button></div>
       <div class="modal-pad">
         <p data-testid="request-what">${holder ? html`<strong>${holder}</strong> holds it${left !== null ? ` (${leftText(left)} left)` : ""}.` : "Someone else holds it."}
-          ${off ? " The hub queues you" : html` Your request reaches ${short(holder) || "the holder"}'s Harness Manager and the board's front panel; the hub queues you`}
+          ${off ? ` ${LEASE_WORDS.serverHub === sw ? "The hub" : "The board"} queues you` : html` Your request reaches ${short(holder) || "the holder"}'s Harness Manager and the board's front panel; ${sw} queues you`}
           ${q ? html` as <b data-testid="request-position">#${pos}</b>, after ${aheadText || "nobody"}.` : "."}
-          ${bots ? ` ${bots === 1 ? "One automation run waits" : `${bots} automation runs wait`} behind you: the hub serves people first.` : ""}</p>
+          ${bots ? ` ${bots === 1 ? "One automation run waits" : `${bots} automation runs wait`} behind you: ${sw} serves people first.` : ""}</p>
         <p class="secondary small">With no answer in 2 minutes you may force-release it. Requesting does not open or lock the board.</p>
         ${q && (q.people.length || q.bots.length) ? html`<div class="lq-inmodal"><div class="field-label">In the queue now</div>
           <${LeaseQueueList} q=${q} compact=${true} testid="request-queue" /></div>` : null}
@@ -1020,7 +1033,7 @@ function ForceConfirm() {
           anything they are running is interrupted.</p>
         ${board ? html`<p class="secondary small" data-testid="force-board">It revokes board <code>${board}</code>${target
           ? html` (the hub target <code>${target}</code> is part of it)` : null}.</p>` : null}
-        <p class="secondary small">The hub records who did it and why${made ? ` (no answer to your request made at ${clock(made)})` : ""},
+        <p class="secondary small">${serverWord(bid) === LEASE_WORDS.serverBoard ? "The board" : "The hub"} records who did it and why${made ? ` (no answer to your request made at ${clock(made)})` : ""},
           and ${holder}'s session is told who took the board.</p>
         ${script ? html`<div data-testid="force-script">
           <${Reason} level="warn" icon="triangle-alert" testid="force-script-why"
@@ -1065,13 +1078,13 @@ export function LeaseBadge({ bid, prefix = "rail" }) {
   if (who.state === "here") {
     const left = leaseLeft(who.lease);
     chip = html`<${Chip} level="ok" icon="user" cls="lease-badge" testid=${`${prefix}-lease-badge`}
-      title=${`Your hub lease: ${leaseWhere(who)}, held by this Harness Manager${left !== null ? `, ${durationText(left)} left` : ""}${who.stale ? `; ${staleNote(who.stale)}` : ""}`}>Yours<//>`;
+      title=${`Your ${serverWord(who) === LEASE_WORDS.serverBoard ? "board" : "hub"} lease: ${leaseWhere(who)}, held by this Harness Manager${left !== null ? `, ${durationText(left)} left` : ""}${who.stale ? `; ${staleNote(who.stale, serverWord(who))}` : ""}`}>Yours<//>`;
   } else if (who.state === "free") {
     chip = html`<${Chip} icon="lock-open" cls="lease-badge" testid=${`${prefix}-lease-badge`}
       title=${`Free: nobody holds ${leaseWhere(who)}`}>Free<//>`;
   } else if (who.state === "unknown") {
     chip = html`<${Chip} level="unk" icon="circle-help" cls="lease-badge" testid=${`${prefix}-lease-badge`}
-      title=${`The lease could not be read from ${who.host || "the hub"}: ${who.error}`}>Lease unknown<//>`;
+      title=${`The lease could not be read from ${who.host || serverWord(who)}: ${who.error}`}>Lease unknown<//>`;
   } else {
     const text = heldText(who);
     chip = html`<${Chip} level="held" icon="lock" cls="lease-badge" testid=${`${prefix}-lease-badge`}
@@ -1092,7 +1105,7 @@ export function ReleaseButton({ bid, compact = true }) {
   const running = p.running === "lease_release";
   return html`<button type="button" class=${`btn release ${compact ? "sm" : ""}`} data-action="lease_release_open"
     aria-haspopup="dialog" aria-busy=${running ? "true" : undefined}
-    title="Give the hub lease back so others can take the board (asks first)"
+    title=${`Give the lease back so others can take the board (asks first)`}
     onClick=${(e) => { if (!running) openReleaseConfirm(bid, e.currentTarget); }}>
     ${running ? html`<${Spinner} /> Giving back...` : html`<${Icon} name="lock-open" /> Give back lease`}</button>`;
 }
@@ -1207,15 +1220,15 @@ export function closeOptions(bid) {
     const next = nextHolder(who);
     opts.push({ k: "restore", t: "Restore baseline, give back and close", dis: loaded === false ? `${base} is loaded already` : restoreWhy,
       said: loaded === false, s: loaded === false ? `${base} is loaded already.`
-        : `Loads ${base}${loaded === null ? " (the design loaded now was not read)" : ` in place of ${design}`}, gives the lease back to the hub, closes ${name}. The next person finds a clean board.` });
+        : `Loads ${base}${loaded === null ? " (the design loaded now was not read)" : ` in place of ${design}`}, gives the lease back to ${serverWord(who)}, closes ${name}. The next person finds a clean board.` });
     const on = leaseName(who) || name;
     const note = leaseTargetNote(who);
     opts.push({ k: "release", t: "Give back and close", testid: "close-release-what",
-      s: `${loaded ? `Leaves ${design} loaded. ` : ""}The lease on ${on}${note ? ` (target ${note})` : ""} goes back to the hub now${next ? `: ${next} is next and gets it` : ""}.` });
+      s: `${loaded ? `Leaves ${design} loaded. ` : ""}The lease on ${on}${note ? ` (target ${note})` : ""} goes back to ${serverWord(who)} now${next ? `: ${next} is next and gets it` : ""}.` });
     opts.push({ k: "keep", t: "Close and keep the lease", testid: "close-keep-what",
       s: `It stays yours${at ? ` until ${clock(at)}` : ""}, but nothing renews it while the board is closed. Open the board again to keep renewing it.` });
   } else if (who.state === "none") {
-    opts.push({ k: "close", t: "Close", s: `${loaded ? `Leaves ${design} loaded. ` : ""}This board has no hub lease.` });
+    opts.push({ k: "close", t: "Close", s: `${loaded ? `Leaves ${design} loaded. ` : ""}This board has no lease.` });
     if (loaded !== false) {
       opts.push({ k: "restoreclose", t: "Restore baseline and close", dis: restoreWhy,
         s: `Loads ${base}${loaded ? ` in place of ${design}` : ""}, then closes.` });
@@ -1225,7 +1238,7 @@ export function closeOptions(bid) {
     opts.push({ k: "close", t: "Close the board",
       s: who.state === "other" ? `The lease stays with ${who.holder}.${req ? " Your request stays in the queue." : ""}`
         : who.state === "elsewhere" ? `${who.holder} keeps the lease in its other session.${req ? " Your request stays in the queue." : ""}`
-        : who.state === "free" ? "Nobody holds the lease." : "The hub lease is left as it is." });
+        : who.state === "free" ? "Nobody holds the lease." : "The lease is left as it is." });
     // R3: restoring drives the board, so it is the lease holder's: offered, and refused with why
     if (loaded !== false) {
       opts.push({ k: "restoreclose", t: "Restore baseline and close", dis: restoreWhy,
@@ -1338,7 +1351,7 @@ function CloseConfirm() {
 // --- what the workspace renders ------------------------------------------------------------------------
 
 function openBoards() {
-  return S.order.filter((bid) => S.boards[bid] && S.boards[bid].open && hubOf(bid));
+  return S.order.filter((bid) => S.boards[bid] && S.boards[bid].open && (hubOf(bid) || takenOf(bid)));
 }
 
 // Above the header: every open board's victim banner and holder prompts (they matter from
@@ -1346,7 +1359,7 @@ function openBoards() {
 export function LeaseBanners({ bid }) {
   const boards = openBoards();
   const others = boards.filter((id) => id !== bid);
-  const order = bid && hubOf(bid) ? [bid, ...others] : others;
+  const order = bid && (hubOf(bid) || takenOf(bid)) ? [bid, ...others] : others;
   return html`
     ${Object.keys(L.idle).map((id) => html`<${IdleBanner} key=${`i-${id}`} bid=${id} />`)}
     ${order.map((id) => html`<${TakenBanner} key=${`t-${id}`} bid=${id} />`)}
@@ -1382,6 +1395,15 @@ onBoardEvent((ev) => {
     return;
   }
   if (ev.topic === "lease.left") w.leaseQueued = false;
+  if (ev.topic === "lease.mode") {
+    // {board, single_user, by, at, via}: the board's mode changed (this page, another PC or the
+    // touchscreen). Read both again; say it when it was not this page.
+    w.leaseModeLoading = false;
+    loadLeaseMode(bid);
+    loadHub(bid);
+    if (d.via && d.via !== "hm") toast(LEASE_WORDS.modeEvent(leaseBoardName(bid), !!d.single_user), { icon: "lock" });
+    return;
+  }
   if (ev.topic === "lease.tapped" && w.hub && d.id) {
     // P3: {id, by, at}: someone tapped the panel's request banner; the read that follows agrees.
     const tap = (n) => (n && n.id === d.id ? { ...n, tapped_at: d.at } : n);
@@ -1389,6 +1411,7 @@ onBoardEvent((ev) => {
   }
   if (ev.topic === "lease.taken") {
     if (w.hub) w.hub = { ...w.hub, taken: { ...d } };
+    if (takenAtBoard(d)) w.takenBoard = { ...d };
     noteTaken(bid, d);
   }
   if (["lease.wanted", "lease.answered", "lease.force_available", "lease.taken", "lease.left",
@@ -1399,6 +1422,7 @@ onBoardEvent((ev) => {
 
 onHubLoaded((bid, hub) => {
   if (hub && hub.taken) noteTaken(bid, hub.taken);
+  if (!hub && takenOf(bid)) noteTaken(bid, takenOf(bid));
   // UI v2: the header's "N waiting" counts automation too; week.js keeps only the people
   // (CCR SHELL2-2 keeps background_queue there): read the whole queue once per open board.
   if (hub && !Array.isArray(hub.background_queue) && !(FULL[bid] && (FULL[bid].data || FULL[bid].loading))) readLease(bid);

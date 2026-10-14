@@ -75,6 +75,8 @@ export const ENDPOINTS = Object.freeze({
   leaseForce: ["POST", "/boards/{bid}/lease/force"],
   leaseLeave: ["DELETE", "/boards/{bid}/lease/queue"],
   leaseTakenDismiss: ["DELETE", "/boards/{bid}/lease/taken"],      // D11
+  leaseMode: ["GET", "/boards/{bid}/lease/mode"],                  // single-user mode (the board's own lease)
+  leaseModeSet: ["POST", "/boards/{bid}/lease/mode"],
   power: ["GET", "/boards/{bid}/power"],
   powerCycle: ["POST", "/boards/{bid}/power/cycle"],
   updateCheck: ["POST", "/update/check"],
