@@ -137,6 +137,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.events import Event, EventBus
+from harness_manager.services import lease_backend
 
 log = logging.getLogger(__name__)
 
@@ -174,6 +175,8 @@ READ_RETRY_S = 20.0
 REQUEST_WINDOW_S = 120
 #: What a board without a hub cannot do (view()'s notes_reason and revoke_reason).
 NO_HUB_REASON = "this board is not behind a hub"
+#: What a board with neither a hub nor single-user mode cannot do (require_server's words).
+NO_LEASE_REASON = "this board has no lease (no hub, and single-user mode is off)"
 #: Requester and holder both look at the hub this often.
 REQUEST_POLL_S = 10.0
 #: A waiting request survives this many unanswered polls in a row (ssh hiccups) minus one.
@@ -194,6 +197,9 @@ _FORCER = re.compile(r"force-released by (\S+) via Harness Manager")
 _BY_SUFFIX = re.compile(r"\(by ([^()]+)\)\s*$")
 #: fpgahub events that end a lease by force; ``lease.revoked`` names ``holder``, the
 #: ``admin_revoked`` audit event ``prior_holder`` (T8: both arrive over the REST event stream).
+#: A board's history entries for a lease ended at the board itself (touchscreen).
+BOARD_BREAK_EVENTS = ("taken", "lease_break", "broken", "mode_off")
+AT_THE_BOARD = "someone at the board"
 REVOKE_EVENTS = ("lease.revoked", "lease.admin_revoked")
 _NOTE_ID = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
 
@@ -870,11 +876,27 @@ class LeaseService:
     # -- hub reads (cached) -----------------------------------------------------------------------
 
     @staticmethod
-    def require_hub(hub: Any, board_id: str = "") -> Any:
-        if hub is None:
-            raise UnavailableError(CAPABILITY, f"{board_id or 'this board'} is not behind a hub; "
-                                               "add a hub table to boards.toml (docs/HIL_B0.md step 0.2)")
-        return hub
+    def require_server(server: Any, board_id: str = "") -> Any:
+        """The lease server (a hub or, in single-user mode, the board itself), or UNAVAILABLE
+        saying which is missing."""
+        if server is None:
+            raise UnavailableError(
+                CAPABILITY, f"{board_id or 'this board'} has no lease (no hub, and single-user "
+                            "mode is off): it is not behind a hub; add a hub table to "
+                            "boards.toml (docs/HIL_B0.md step 0.2)")
+        return server
+
+    #: The old name (hub routes, tests) keeps working.
+    require_hub = require_server
+
+    @staticmethod
+    def _need_mode(server: Any, board_id: str = "") -> None:
+        """A board server in shared mode has no lease to take or ask for."""
+        if lease_backend.kind_of(server) == lease_backend.KIND_BOARD:
+            mode = lease_backend.mode_of(server)
+            if mode is not None and not mode.single_user:
+                raise UnavailableError(CAPABILITY, f"{board_id or 'this board'}: "
+                                       + lease_backend.WORDS["board"]["mode_off"])
 
     def _cached(self, hub: Any, what: str, fn: Callable[[], Any], *, fresh: bool = False,
                 ttl_s: float = VIEW_TTL_S) -> Any:
@@ -962,6 +984,8 @@ class LeaseService:
         when it says (REST), else, when ``ask``, the client's ``lease_queues`` (SSH: one more
         hub call, reused ``BACKGROUND_TTL_S``), else unknown with why. A read that fails is
         unknown too: never "nobody waits"."""
+        if lease_backend.kind_of(hub) != lease_backend.KIND_HUB:
+            return [], False, "a board has no background queue"
         if getattr(shown, "background_known", False):
             return list(getattr(shown, "background_queue", ()) or ()), True, ""
         fn = getattr(hub.client, "lease_queues", None)
@@ -1080,8 +1104,8 @@ class LeaseService:
         with self._mu:
             tr = self._tracked.get(ev.board_id)
             hub = tr.hub if tr is not None else self._hubs.get(ev.board_id)
-        if hub is None:
-            return
+        if hub is None or lease_backend.kind_of(hub) != lease_backend.KIND_HUB:
+            return                       # hub events are the hub's; a board has none
         self._forget(hub)
         etype = str((ev.data or {}).get("type", ""))
         data = dict((ev.data or {}).get("data") or {})
@@ -1144,7 +1168,8 @@ class LeaseService:
             try:
                 who = str(fn() or "")
             except HarnessError as exc:
-                log.warning("the hub %s did not say who this client is: %s", hub.host, exc.message)
+                log.warning("%s %s did not say who this client is: %s",
+                            lease_backend.server_word(hub), hub.host, exc.message)
                 with self._mu:
                     self._principal_failed[key] = self._clock()
                 if required:
@@ -1155,8 +1180,9 @@ class LeaseService:
                 self._principal_failed.pop(key, None)
         elif required:
             raise UnavailableError(REQUEST_CAPABILITY,
-                                   f"the hub {hub.host} does not say who this client is "
-                                   "(fpgahub whoami); lease requests need fpgahub 0.3.0")
+                                   f"{lease_backend.server_word(hub)} {hub.host} does not say who "
+                                   "this client is (fpgahub whoami); lease requests need "
+                                   "fpgahub 0.3.0")
         return who
 
     def _need(self, hub: Any, *verbs: str) -> None:
@@ -1410,6 +1436,9 @@ class LeaseService:
         action, or a board's own lease read). A hub that does not answer raises (502
         UNREACHABLE: not known is not free); a client with no overview is UNAVAILABLE."""
         fn = getattr(getattr(hub, "client", None), "lease_overview", None)
+        if lease_backend.kind_of(hub) != lease_backend.KIND_HUB:
+            raise UnavailableError(CAPABILITY, f"{name} is not a hub: a board lists only its "
+                                               "own lease")
         if not callable(fn):
             raise UnavailableError(CAPABILITY, f"the hub client for {name} cannot list every "
                                                "target's lease in one read")
@@ -1539,9 +1568,20 @@ class LeaseService:
                                  "can_revoke": False, "revoke_reason": NO_HUB_REASON,
                                  # ui2 api-hub (G11, additive)
                                  "background_queue": [], "background_known": False,
-                                 "background_reason": NO_HUB_REASON}
+                                 "background_reason": NO_HUB_REASON,
+                                 # Release 3 (additive): which lease server, and its mode
+                                 "server": None, "mode": None}
         if hub is None:
             return empty
+        kind = lease_backend.kind_of(hub)
+        server = {"kind": kind, "host": hub.host,
+                  "name": str(getattr(hub, "name", "") or "")}
+        mode = lease_backend.mode_of(hub) if kind == lease_backend.KIND_BOARD else None
+        mode_d = asdict(mode) if mode is not None else None
+        if mode is not None and not mode.single_user:
+            off = lease_backend.WORDS[kind]["mode_off"]
+            return {**empty, "hub": hub.host, "board": None, "server": server, "mode": mode_d,
+                    "notes_reason": off, "revoke_reason": off, "background_reason": off}
         if cached_only:
             with self._mu:
                 hit = self._views.get(_hk(hub))
@@ -1551,6 +1591,7 @@ class LeaseService:
         notes_ok, notes_why = self._notes_supported(hub)
         can, why = self._can_revoke(hub)
         out = {**empty, "hub": hub.host, "board": self._board_id(hub),
+               "server": server, "mode": mode_d,
                "notes_supported": notes_ok, "notes_reason": "" if notes_ok else notes_why,
                "can_revoke": can, "revoke_reason": "" if can else why}
         self._drop_at_edges(hub)
@@ -1792,7 +1833,8 @@ class LeaseService:
         ``ttl_s``, ``holder`` and ``timeout_s`` not given: the hub's ``lease_ttl``, ``holder``
         and ``queue_timeout`` (a named hub, SET-HUB-3), else 3600 s, ``default_holder()``
         and 3600 s."""
-        hub = self.require_hub(hub, board_id)
+        hub = self.require_server(hub, board_id)
+        self._need_mode(hub, board_id)
         self._board_for(hub, board_id)
         if ttl_s is None:
             ttl_s = hub_lease_ttl(hub)
@@ -1889,7 +1931,7 @@ class LeaseService:
         return True
 
     def release(self, hub: Any, *, board_id: str = "") -> dict[str, Any]:
-        hub = self.require_hub(hub, board_id)
+        hub = self.require_server(hub, board_id)
         if self.cancel_acquire(board_id):
             return {"ok": True, "cancelled": True}
         stored = self.store.get(hub.host, hub.target)
@@ -1925,7 +1967,8 @@ class LeaseService:
         ``want_s`` (ui2 api-hub, G11): how long we want the board, carried in the request note
         for the holder to read (0: not said).
         """
-        hub = self.require_hub(hub, board_id)
+        hub = self.require_server(hub, board_id)
+        self._need_mode(hub, board_id)
         self._board_for(hub, board_id)
         if ttl_s is None:
             ttl_s = hub_request_ttl(hub)                 # SET-HUB-3: the hub's request_ttl
@@ -2160,7 +2203,7 @@ class LeaseService:
 
     def leave(self, board_id: str, hub: Any) -> dict[str, Any]:
         """Leave the queue and withdraw our request: ``{left: bool}``."""
-        hub = self.require_hub(hub, board_id)
+        hub = self.require_server(hub, board_id)
         self._board_for(hub, board_id)
         self._need(hub, "list_requests", "delete_request")
         principal = self._principal(hub, required=True)
@@ -2187,7 +2230,7 @@ class LeaseService:
     def respond(self, board_id: str, hub: Any, request_id: str, answer: str, *, minutes: int = 0,
                 message: str = "") -> dict[str, Any]:
         """Answer a request for our lease: ``release`` (now) or ``keep`` (5/15/30/60 min)."""
-        hub = self.require_hub(hub, board_id)
+        hub = self.require_server(hub, board_id)
         self._board_for(hub, board_id)
         if not isinstance(request_id, str) or not _NOTE_ID.fullmatch(request_id):
             raise UsageError(f"request id {request_id!r} is not a request id ([A-Za-z0-9_.-])")
@@ -2244,7 +2287,7 @@ class LeaseService:
         ``board_names`` (the names the caller showed, the one it asked for first: the N1
         name, then e.g. the address), the hub's board and the target. Missing: USAGE;
         another name: REFUSED; both before any revoke."""
-        hub = self.require_hub(hub, board_id)
+        hub = self.require_server(hub, board_id)
         self._board_for(hub, board_id)
         if confirm is not True:
             raise UsageError("force-release needs confirm: true",
@@ -2363,10 +2406,12 @@ class LeaseService:
         mine = {stored.principal, stored.holder, holder} - {""}
         since = stored.acquired_at or 0.0
         best: dict[str, Any] | None = None
+        board = lease_backend.kind_of(hub) == lease_backend.KIND_BOARD
         for entry in history:
             if not isinstance(entry, dict):
                 continue
-            if str(entry.get("event", "")).rsplit(".", 1)[-1] != "admin_revoked":
+            ev = str(entry.get("event", "")).rsplit(".", 1)[-1]
+            if ev != "admin_revoked" and not (board and ev in BOARD_BREAK_EVENTS):
                 continue
             prior = entry.get("prior_holder")
             if prior and prior not in mine:
@@ -2380,6 +2425,8 @@ class LeaseService:
         reason = str(best.get("reason", "") or "")
         m = _FORCER.search(reason)
         by = m.group(1) if m else str(best.get("by") or new_holder or "")
+        if board and str(best.get("event", "")).rsplit(".", 1)[-1] in BOARD_BREAK_EVENTS:
+            by = str(best.get("by") or "") or AT_THE_BOARD    # ended at the touchscreen
         return {"by": by, "reason": reason,
                 "at": iso_norm(best.get("ts") or best.get("at")) or iso_utc(self._wall())}
 
@@ -2583,7 +2630,9 @@ def not_fresh(view: Any) -> str:
         return ""
     at = parse_utc(stale.get("confirmed_at"))
     when = f"; it was last confirmed at {_hhmmss(at)}" if at is not None else ""
-    return f"the hub did not answer ({stale.get('error') or 'no answer'}){when}"
+    server = (view or {}).get("server") or {}
+    word = lease_backend.WORDS.get(server.get("kind") or "", lease_backend.WORDS["hub"])["server"]
+    return f"{word} did not answer ({stale.get('error') or 'no answer'}){when}"
 
 
 def _hhmmss(t: float) -> str:

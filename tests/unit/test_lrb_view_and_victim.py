@@ -19,7 +19,9 @@ from tests.fakes.lrb_rig import BID, BOB, CAROL, DAVID, World
 VIEW_KEYS = {"lease", "hub", "board", "queue", "request", "incoming", "taken",
              "notes_supported", "notes_reason", "can_revoke", "revoke_reason",
              # UI v2 (ui2 api-hub, G11), additive
-             "background_queue", "background_known", "background_reason"}
+             "background_queue", "background_known", "background_reason",
+             # Release 3 (board lease), additive
+             "server", "mode"}
 #: UI v2 (ui2 api-hub, G11): what each waiter adds to the frozen four.
 WAITER_KEYS = {"position", "holder", "user", "mine", "tier", "request_id", "message", "want_s",
                "since"}
@@ -148,7 +150,8 @@ def test_the_view_has_exactly_the_api_shape(world):
                                 "revoke_reason": "this board is not behind a hub",
                                 # ui2 api-hub (G11)
                                 "background_queue": [], "background_known": False,
-                                "background_reason": "this board is not behind a hub"}
+                                "background_reason": "this board is not behind a hub",
+                                "server": None, "mode": None}   # Release 3, additive
 
 
 def test_incoming_leaves_out_stale_notes_whose_requester_is_not_queued(world):

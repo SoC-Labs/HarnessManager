@@ -64,6 +64,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.events import Event
+from harness_manager.services import lease_backend
 
 log = logging.getLogger(__name__)
 
@@ -462,9 +463,9 @@ class HilRuns:
         """(``here`` | ``free`` | ``elsewhere`` | ``other`` | ``none``, the lease view, the hub).
         One hub read (the lease service's 10 s cache)."""
         session = self._session(board_id)
-        hub = getattr(session, "hub", None)
+        hub = lease_backend.lease_of(session)
         leases = self._leases()
-        if hub is None or leases is None:
+        if hub is None or leases is None or not lease_backend.lease_required(hub):
             return "none", {}, hub
         view = leases.view(hub)
         lease = view.get("lease") if isinstance(view, dict) else None
@@ -478,6 +479,17 @@ class HilRuns:
                        take: bool) -> HarnessError | None:
         lease = (view or {}).get("lease") or {}
         name = lease.get("board") or view.get("board") or lease.get("target") or board_id
+        try:
+            server = lease_backend.lease_of(self._session(board_id))
+        except HarnessError:
+            server = None
+        lease_word = lease_backend.WORDS[lease_backend.kind_of(server)]["lease"] \
+            if server is not None else "hub lease"
+        if state == "none" and server is not None:
+            return UnavailableError(CAPABILITY, f"{board_id} is shared ("
+                                    + lease_backend.WORDS["board"]["mode_off"] + "): the checks "
+                                    "need the board set to one person at a time, so they can "
+                                    "hold its lease (every plan's first gate)")
         if state == "none":
             return UnavailableError(CAPABILITY, f"{board_id} is not behind a hub: the checks "
                                                 "need its hub lease held here (every plan's "
@@ -486,12 +498,12 @@ class HilRuns:
             holder = lease.get("holder") or "someone else"
             also = " (your hub name, another session or tool: not this Harness Manager)" \
                 if state == "elsewhere" else ""
-            return HeldError(f"the hub lease on {name} is held by {holder}{also}",
+            return HeldError(f"the {lease_word} on {name} is held by {holder}{also}",
                              holder=holder, hint="the checks need the lease free or held by this "
                                                  "Harness Manager; ask for it (Request board) "
                                                  "or wait. A run never forces a lease")
         if state == "free" and not take:
-            return RefusedError(f"nobody holds the hub lease on {name}: take it for the run",
+            return RefusedError(f"nobody holds the {lease_word} on {name}: take it for the run",
                                 hint='"take_lease": true: the service takes it when the run '
                                      "starts, holds it until the run ends, then releases it")
         return None

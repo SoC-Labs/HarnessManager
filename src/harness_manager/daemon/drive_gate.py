@@ -7,7 +7,10 @@ the check could drive a board someone else holds. Now the service refuses too, w
 rule every lease gate uses (FIX-PACK-4; ``services.update.lease_gate``, as harness installs,
 XVC and the SSH claim do):
 
-- a board with no hub (``session.hub`` None) has no lease: never refused for it;
+- a board with no lease server (no hub, and single-user mode off) has no lease: never
+  refused for it. Release 3: a board in single-user mode gates the same way in the board's
+  words ("<board> is set to one person at a time and <who> has it until <hh:mm>"), and the
+  ``RESET`` escape below is for hub boards only (the board enforces its own lease);
 - behind a hub, the lease must be held HERE (this Harness Manager has the token). Nobody
   holding it, your hub name in another session, someone else, or a lease the hub did not
   confirm (not known is not free) is 409 HELD, before anything reaches the board, naming the
@@ -24,9 +27,12 @@ moment ago counts); a job or a read afterwards does not ask again.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from harness_manager.core.errors import HeldError, RefusedError, UsageError
+from harness_manager.services import lease_backend
+from harness_manager.services.lease import parse_utc
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +62,8 @@ def require_holder(d: Any, bid: str, session: Any, kind: str,
     here, or the reset escape is given. Returns the lease state (None: no hub, or a service
     with no lease service)."""
     leases = getattr(d, "leases", None)
-    if getattr(session, "hub", None) is None or leases is None:
+    server = lease_backend.lease_of(session)
+    if server is None or leases is None:
         return None
     from harness_manager.services.update.lease_gate import lease_state
 
@@ -64,6 +71,8 @@ def require_holder(d: Any, bid: str, session: Any, kind: str,
     if not st["required"] or st["here"]:
         return st
     what = WHAT.get(kind, kind)
+    if lease_backend.kind_of(server) == lease_backend.KIND_BOARD:
+        return _board_refusal(server, leases, st, what)      # the board enforces it: no escape
     force, consent = escape(body)
     if force:
         from harness_manager.services.reset_guard import force_phrase
@@ -86,6 +95,40 @@ def require_holder(d: Any, bid: str, session: Any, kind: str,
     err = HeldError(f"cannot {what}: on a board behind a hub it is for the lease holder only, "
                     f"and {st['reason']}", holder=st["holder"],
                     hint=f"{hint}; or force it: force true with consent \"RESET {bid}\"")
+    err.data = {"reason": REASON, "lease": {k: st[k] for k in (   # type: ignore[attr-defined]
+        "required", "mine", "here", "holder", "target")}}
+    raise err
+
+
+def _until(server: Any, leases: Any, st: dict[str, Any]) -> str:
+    """" until hh:mm" when the board's own lease view says when the holder's time ends."""
+    if st["holder"] in ("nobody", "") or st["holder"].startswith("unknown"):
+        return ""
+    try:
+        view = leases.view(server, cached_only=True, max_age_s=60.0) or {}
+        at = parse_utc((view.get("lease") or {}).get("expires_at"))
+    except Exception:  # noqa: BLE001 - the time is a nicety
+        return ""
+    return f" until {datetime.fromtimestamp(at).strftime('%H:%M')}" if at is not None else ""
+
+
+def _board_refusal(server: Any, leases: Any, st: dict[str, Any], what: str) -> dict[str, Any]:
+    """The refusal for a board in single-user mode: its words, and no ``force`` escape (the
+    board enforces its own lease; the hub's RESET phrase does not apply)."""
+    name = str(getattr(server, "name", "") or st["target"])
+    if st["holder"] == "nobody":
+        hint = "take the lease first (Take lease, or `harness-manager lease acquire TARGET`)"
+        why = f"nobody has it: {st['reason']}"
+    elif st["holder"].startswith("unknown"):
+        hint = "retry when the board answers; not known is not free"
+        why = st["reason"]
+    else:
+        hint = "ask for the board (Request, or `harness-manager lease request TARGET`)"
+        if st["mine"]:
+            hint = "use the session that holds the lease, or give it back there first"
+        why = f"{st['holder']} has it{_until(server, leases, st)}"
+    err = HeldError(f"cannot {what}: {name} is set to one person at a time and {why}",
+                    holder=st["holder"], hint=hint)
     err.data = {"reason": REASON, "lease": {k: st[k] for k in (   # type: ignore[attr-defined]
         "required", "mine", "here", "holder", "target")}}
     raise err

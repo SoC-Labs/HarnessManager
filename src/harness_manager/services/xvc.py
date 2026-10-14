@@ -104,7 +104,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.pack import BoardSession
 from harness_manager.services.claim import lock_error, lock_refusal
-from harness_manager.services.lease import elsewhere_text, held_here, not_fresh
+from harness_manager.services.lease import elsewhere_text
 
 log = logging.getLogger(__name__)
 
@@ -1235,41 +1235,35 @@ class XvcService:
         return self.leases
 
     def check_lease(self, session: BoardSession) -> str:
-        """``""`` for a board with no hub; the holder when the lease is ours; else HeldError."""
-        hub = getattr(session, "hub", None)
-        if hub is None:
+        """``""`` for a board with no lease to hold (no hub, or a board in shared mode); the
+        holder when the lease is ours; else HeldError. The one rule every lease gate uses
+        (``update.lease_gate.lease_state``), in the lease server's words."""
+        from harness_manager.services import lease_backend
+        from harness_manager.services.update.lease_gate import lease_state
+
+        server = lease_backend.lease_of(session)
+        if server is None or not lease_backend.lease_required(server):
             return ""
-        target = getattr(hub, "target", "") or "the board"
-        leases = self._lease_service()
-        forget = getattr(leases, "forget", None)
-        if callable(forget):
-            forget(hub)            # a fresh answer: a lease taken a moment ago counts
-        try:
-            view = leases.view(hub)
-        except HarnessError as exc:
-            raise HeldError(f"cannot confirm you hold the lease on {target}: {exc.message}",
-                            holder="unknown (the hub did not answer)",
-                            hint="XVC opens for the lease holder only; retry when the hub "
-                                 "answers (`harness-manager lease show TARGET`)") from exc
-        stale = not_fresh(view)             # LEASE-FRESH: a carried state is not an answer
-        if stale:
-            raise HeldError(f"cannot confirm you hold the lease on {target}: {stale}",
-                            holder="unknown (the hub did not answer)",
-                            hint="XVC opens for the lease holder only; retry when the hub "
+        st = lease_state(session, self._lease_service())
+        word = lease_backend.server_word(server)
+        target = st["target"]
+        holder = st["holder"]
+        if holder.startswith("unknown"):
+            raise HeldError(st["reason"], holder=holder,
+                            hint=f"XVC opens for the lease holder only; retry when {word} "
                                  "answers (`harness-manager lease show TARGET`)")
-        lease = (view or {}).get("lease")
-        if not lease:
+        if holder == "nobody":
             raise HeldError(f"XVC is for the lease holder only, and nobody holds {target}",
                             holder="nobody",
                             hint="take the lease first: `harness-manager lease acquire TARGET`")
-        if not held_here(lease):             # FIX-PACK-4: here, not mine (another session)
-            who = lease.get("holder") or "someone else"
+        if not st["here"]:                   # FIX-PACK-4: here, not mine (another session)
+            lease = {"holder": holder, "mine": st["mine"], "here": False}
             raise HeldError(f"XVC is for the lease holder only: {elsewhere_text(lease, target)}",
-                            holder=who,
+                            holder=holder or "someone else",
                             hint="run it from the session that holds the lease, or release it "
-                                 "there first" if lease.get("mine") else
+                                 "there first" if st["mine"] else
                                  "ask for the board: `harness-manager lease request TARGET`")
-        return str(lease.get("holder") or "")
+        return holder
 
     # -- ports -------------------------------------------------------------------------------
 
