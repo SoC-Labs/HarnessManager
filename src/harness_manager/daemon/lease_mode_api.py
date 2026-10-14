@@ -131,16 +131,37 @@ def register(ctx: RouteContext) -> None:
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             progress("switch", 0, 1)
+            ttl_s = _ttl_min(d.state_dir) * 60
+            set_ttl = getattr(adapter.client, "set_ttl", None)
+            if callable(set_ttl):
+                set_ttl(ttl_s)
             out = adapter.client.set_mode(want, take=want, confirm_board=confirm_board)
             progress("switch", 1, 1)
             leases = getattr(d, "leases", None)
-            forget = getattr(leases, "forget", None)
-            if callable(forget):
-                forget(adapter)
-            if want and leases is not None:
-                leases.track(bid, adapter)            # heartbeat the lease just taken
-            after = lb.mode_of(adapter)
             lease = out.get("lease") if isinstance(out, dict) else None
+            token = getattr(out, "token", "") if getattr(out, "granted", False) else ""
+            if leases is not None:
+                # Keep the books as LeaseService.acquire would: the lease the board granted in
+                # the same step is stored (it survives a restart) and heartbeated; switching
+                # off ends ours.
+                adopt = getattr(leases, "adopt", None)
+                drop = getattr(leases, "drop_stored", None)
+                forget = getattr(leases, "forget", None)
+                if token and callable(adopt):
+                    adopt(adapter, board_id=bid, token=token, ttl_s=ttl_s,
+                          expires_at=getattr(out, "expires_at", ""))
+                else:
+                    if not want and callable(drop):
+                        drop(adapter, board_id=bid)
+                    elif callable(forget):
+                        forget(adapter)
+                    if want:
+                        leases.track(bid, adapter)
+                if token and callable(getattr(leases, "view", None)):
+                    view = leases.view(adapter)          # the same object GET /lease shows
+                    shown = view.get("lease") if isinstance(view, dict) else None
+                    lease = shown if shown is not None else lease
+            after = lb.mode_of(adapter)
             d.bus.publish(Event(TOPIC, bid, {
                 "board": board, "single_user": want, "by": _principal(adapter),
                 "at": _now_iso(), "via": "hm"}))
