@@ -455,6 +455,104 @@ class Diagnosis:
 Preamble = Callable[[ShellClient, _TapTransport], None]
 
 
+# --- the board lease on the control port (Release 3, net-protocol v0.21) ----------------
+#
+# In single-user mode a board refuses every gated verb that does not carry the holder's token
+# (top-level ``"lease": "<32 hex>"``; the wire names are pyverify's ``board_lease.py``). The
+# board-lease preamble is the SECOND link of the preamble chain (after ``Mps3Shell.preamble``,
+# the panel's ride): it adds the token to gated requests when this Harness Manager holds the
+# board lease, and turns the board's lease refusals into ``HeldError`` with
+# ``data.reason == "LEASE"`` (the drive gate's reason). Tokens are looked up by the board's
+# control address (``gate_key``), so a shell on a claim forward (same gate key) carries it too.
+
+#: Board lease refusal codes (pyverify ``board_lease.CODES``): the ones a gated verb meets.
+LEASE_REFUSAL_CODES = ("leased", "lease_required", "bad_token")
+#: Verbs the board's gate holds to the lease (pyverify FakeShell / SEC table; the same list the
+#: claim lock refuses). ``display`` (not a query), ``touch_cal`` set/default and ``usd`` actions
+#: are gated too (``lease_gated``).
+LEASE_GATED_VERBS = ("swap", "reset", "set_clk", "link", "macgen", "dutrx", "reboot", "commit",
+                     "cosim", "hostio", "mccif")
+LEASE_REASON = "LEASE"
+
+#: ``gate_key`` -> a callable giving the lease token this process holds for that board (or "").
+_lease_tokens: dict[str, Callable[[], str]] = {}
+
+
+def set_lease_token_source(gate_key: str, source: Callable[[], str] | None) -> None:
+    """Register (or with None, drop) where the shells of the board at ``gate_key`` find the
+    board lease token. The board lease adapter (``board_lease``) does this."""
+    if source is None:
+        _lease_tokens.pop(gate_key, None)
+    else:
+        _lease_tokens[gate_key] = source
+
+
+def lease_token_for(gate_key: str) -> str:
+    """The board lease token held for ``gate_key``, or ``""``."""
+    source = _lease_tokens.get(gate_key)
+    try:
+        return str(source() or "") if source is not None else ""
+    except Exception:  # noqa: BLE001 - a broken store must not break a control call
+        logging.getLogger(__name__).warning("reading the board lease token failed", exc_info=True)
+        return ""
+
+
+def lease_gated(op: dict[str, Any]) -> bool:
+    """Does the board hold this request to the lease? (Not the ``lease`` verb itself.)"""
+    verb = op.get("op")
+    if verb in LEASE_GATED_VERBS:
+        return True
+    if verb == "display":
+        return op.get("owner") != "query" and op.get("act") != "query"
+    if verb == "touch_cal":
+        return op.get("act") in ("set", "default")
+    if verb == "usd":
+        return bool(op.get("action"))
+    return False
+
+
+def lease_refusal(reply: dict[str, Any]) -> HeldError | None:
+    """``HeldError`` (``data.reason`` ``LEASE``) for a board lease refusal reply, in the
+    board's own plain words; None for any other reply."""
+    if reply.get("ok") is not False or str(reply.get("code") or "") not in LEASE_REFUSAL_CODES:
+        return None
+    code = str(reply["code"])
+    err = HeldError(str(reply.get("err") or "the board is in single-user mode: this needs the "
+                                            "board lease"),
+                    holder=str(reply.get("holder") or ""),
+                    hint="take the board lease first (Take lease), or ask whoever holds it")
+    err.data = {"reason": LEASE_REASON, "code": code,    # type: ignore[attr-defined]
+                "err": str(reply.get("err") or "")}
+    return err
+
+
+def board_lease_preamble(token: str) -> Preamble:
+    """The preamble that carries ``token`` on gated requests and maps lease refusals."""
+
+    def arm(client: ShellClient, _tap: _TapTransport) -> None:
+        send, recv = client._send_op, client._recv_resp
+        asked: list[bool] = [False]                  # was the last request one the lease covers?
+
+        def send_op(op: dict[str, Any]) -> Any:
+            covered = isinstance(op, dict) and op.get("op") != "lease"
+            asked[0] = covered
+            if covered and token and lease_gated(op) and "lease" not in op:
+                op = {**op, "lease": token}
+            return send(op)
+
+        def recv_resp() -> dict[str, Any]:
+            reply = recv()
+            refusal = lease_refusal(reply) if asked[0] else None
+            if refusal is not None:
+                raise refusal
+            return reply
+
+        client._send_op = send_op                    # type: ignore[method-assign]
+        client._recv_resp = recv_resp                # type: ignore[method-assign]
+
+    return arm
+
+
 class Mps3Shell:
     def __init__(self, host: str, port: int, *, timeout: float = 3.0,
                  probes: ShellProbes | None = None, gate_key: str = "") -> None:
@@ -591,17 +689,26 @@ class Mps3Shell:
         clear_failed_push(self.host, self.port)
         return result
 
+    def _preambles(self) -> list[Preamble]:
+        """The chain run on each new connection, in order: ``self.preamble`` (the panel's
+        ride), then the board lease's (token on gated requests; lease refusals mapped)."""
+        chain: list[Preamble] = []
+        if self.preamble is not None:
+            chain.append(self.preamble)
+        chain.append(board_lease_preamble(lease_token_for(self.gate_key)))
+        return chain
+
     def _call_raw(self, fn: Callable[[ShellClient, _TapTransport], T],
                   taps: list[_TapTransport] | None = None) -> T:
         where = f"{self.host}:{self.port}"
-        preamble = self.preamble
+        chain = self._preambles()
         tap = self._connect()
         if taps is not None:
             taps.append(tap)
         try:
             with ShellClient(self.host, self.port, timeout=self.timeout, transport=tap) as client:
-                if preamble is not None:
-                    preamble(client, tap)
+                for pre in chain:
+                    pre(client, tap)
                 return fn(client, tap)
         except _ShellBusy as exc:
             holder = str(exc.reply.get("holder") or exc.reply.get("peer") or "")
