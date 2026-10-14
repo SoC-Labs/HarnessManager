@@ -67,6 +67,7 @@ from harness_manager.core.pack import (
     report_progress,
 )
 from harness_manager.services import design_check, reset_guard
+from harness_manager.services.lease_backend import lease_of, server_word
 from harness_manager.services.quiet import (
     VIEWER_HEADER,
     BackgroundGate,
@@ -416,6 +417,7 @@ class Daemon:
         # "off", and backs off when the board turns a connection away. The demo's boards are
         # scripted (``fake_boards``): its gate says yes to everything.
         self.quiet = BackgroundGate(policy_of=self._poll_policy, lease_of=self._lease_elsewhere,
+                                    lease_word_of=self._lease_word,
                                     enabled=not getattr(engine, "fake_boards", False))
         self._unquiet = [self.bus.subscribe("session.opened", self._quiet_opened),
                          self.bus.subscribe("session.closed", self._quiet_closed)]
@@ -436,6 +438,14 @@ class Daemon:
             links = ()
         return policy_for(board_id, links)
 
+    def _lease_word(self, board_id: str) -> str:
+        """"hub lease" or "board lease" for the background gate's texts (Release 3)."""
+        try:
+            adapter = lease_of(self.engine.session(board_id))
+        except HarnessError:
+            adapter = None
+        return "board lease" if server_word(adapter) == "the board" else "hub lease"
+
     def _lease_elsewhere(self, board_id: str,
                          rule: Callable[[dict[str, Any] | None], str] = lease_elsewhere) -> str:
         """The lease holder when ``rule`` says the board's lease is not ours (the lease
@@ -446,7 +456,7 @@ class Daemon:
         if leases is None:
             return ""
         try:
-            hub = getattr(self.engine.session(board_id), "hub", None)
+            hub = lease_of(self.engine.session(board_id))   # Release 3: hub or board lease
         except HarnessError:
             return ""
         if hub is None:
@@ -467,7 +477,7 @@ class Daemon:
         if leases is None:
             return None
         try:
-            hub = getattr(self.engine.session(board_id), "hub", None)
+            hub = lease_of(self.engine.session(board_id))   # Release 3: hub or board lease
         except HarnessError:
             return None
         if hub is None or leases.store.get(hub.host, hub.target) is None:

@@ -94,7 +94,8 @@ def lease_of(d: Any, bid: str) -> tuple[bool, dict[str, Any] | None, str]:
     service's view (cached; at most one hub read, itself cached 10 s)."""
     leases = getattr(d, "leases", None)
     try:
-        hub = getattr(d.engine.session(bid), "hub", None)
+        from harness_manager.services.lease_backend import lease_of as _server_of
+        hub = _server_of(d.engine.session(bid))      # Release 3: hub or board lease
     except HarnessError:
         hub = None
     if hub is None or leases is None:
