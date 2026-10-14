@@ -133,6 +133,7 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
 EXTENSIONS += ("readings_api",)
 EXTENSIONS += ("persist_api",)    # HM 1.2 L3: back up /persist before a card re-make
 EXTENSIONS += ("cosim_api",)      # HM 1.2 L5c: the DUT clock (feature cosim)
+EXTENSIONS += ("lease_mode_api",)  # Release 3: single-user mode (the board's own lease)
 # --- end ui2 api-build routes ---
 
 
