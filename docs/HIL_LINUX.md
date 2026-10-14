@@ -524,6 +524,12 @@ harness-manager program $B nanosoc_ila | tee $EV/e1_program_ila.txt
 ```
 **Expect:** `programmed nanosoc_ila (0x0100000a) into <board> in N s via tcp; verified`.
 
+**Needs B2 done.** On a claimed board the swap goes through the claim, which only this Harness
+Manager's adopted key can use. On a board claimed by another key it stops at once, exit 15
+(`the swap to nanosoc_ila needs the claiming key over the board's own SSH`), and sends nothing:
+do B2 (adopt), then repeat. The unattended runner (`make hil-auto`) says the same in its
+ANNOUNCE.txt and stops at E1.
+
 **E2. Open XVC** (terminal C)
 ```bash
 source ~/SoCLabs/harness-manager/docs/evidence/2026-09-hil-linux/env.sh

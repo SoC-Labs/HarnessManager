@@ -1157,6 +1157,12 @@ def announce_text(plan: P.Plan, o: Options, started: float) -> str:
         "forces or releases one")
     stop = o.stop_line or (f"kill -INT {os.getpid()} (or Ctrl-C in its tmux): it finishes the "
                            "check, restores greybox, writes REPORT.md")
+    claim_line = []
+    if plan.impl == "linux" and any(c.tier == P.SAFE for c in auto):
+        claim_line = [
+            "claim        a swap on a claimed board needs THIS Harness Manager to hold the claim "
+            "(run `board claim --adopt` first, runbook B2). If the board is claimed by another "
+            "key, E1 stops the run before anything is sent"]
     return "\n".join([
         f"HM HIL-AUTO on {o.board} ({plan.runbook}, plan {plan.name})",
         f"start        {_iso(started)} {where}",
@@ -1164,6 +1170,7 @@ def announce_text(plan: P.Plan, o: Options, started: float) -> str:
         f"runs         {reps}; {len(auto)} automatic checks each; writes {o.writes}",
         f"expects      static {plan.static} ({plan.impl} harness); any other identity stops it",
         f"lease        {lease}",
+        *claim_line,
         "changes      " + ("nothing on the board (read only)" if not changes
                              else "each iteration:"),
         *changes,

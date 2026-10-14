@@ -384,15 +384,15 @@ def test_stage_only_stages_and_never_switches_even_with_a_board_open(world):
     open_board(w)
     with FakeChannelServer(w["root"].parent / "www") as srv:
         builder = ChannelBuilder(srv.root, KEYS)
-        builder.add_app("1.2.0", AssetFile("harness_manager-1.2.0-py3-none-any.whl", b"PK-w"))
+        builder.add_app("99.0.0", AssetFile("harness_manager-99.0.0-py3-none-any.whl", b"PK-w"))
         builder.publish(serial=1)
         r = w["client"].post("/api/v1/update/app", headers=H,
                              json={"source": srv.source(), "stage_only": True})
         state = wait_job(w["client"], r.json()["job"])
     assert state["state"] == "done", state
-    assert (state["result"]["version"], state["result"]["staged"]) == ("1.2.0", True)
+    assert (state["result"]["version"], state["result"]["staged"]) == ("99.0.0", True)
     ptr = w["svc"].app().state()
-    assert ptr["current"] == "" and ptr["versions"]["1.2.0"]["state"] == "staged"
+    assert ptr["current"] == "" and ptr["versions"]["99.0.0"]["state"] == "staged"
 
 
 # --- the resumed daemon's side ----------------------------------------------------------------

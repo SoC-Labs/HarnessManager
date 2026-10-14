@@ -145,7 +145,7 @@ def test_a_run_through_the_service_that_holds_the_board_passes(nocard, capsys):
             [(c["id"], c["reason"]) for c in summary(last["evidence"])["checks"]
              if c["verdict"] == "fail"], last["reason"])
         assert {k for k, x in v.items() if x == "pass"} - {"D4a"} == {
-            "0.2", "0.3", "0.4", "A1", "A2", "A3", "A5", "A6", "B1", "C1", "D1", "E1", "E1b",
+            "0.2", "0.3", "0.4", "A1", "A2", "A3", "A5", "A6", "B1", "B3", "C1", "D1", "E1", "E1b",
             "Z2", "Z2b"}
         # every command went through the service, which still holds the board
         assert BID in svc.d.engine.open_boards()

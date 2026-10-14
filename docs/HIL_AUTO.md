@@ -260,6 +260,11 @@ and B3 expect a card-backed board.
    never forced) and reads the identity back. **The SSH claim:** it never claims, so the claim
    ends as it started (B1's state, read again at the end). Harness Manager has no verb to
    unclaim: only `mps3-unclaim` on the board's serial console does that.
+   **A swap needs the claim held here.** On a claimed board (every Linux board from image v2.2) a
+   swap goes through the claim, and only the key this Harness Manager pinned (`board claim
+   --adopt`, runbook B2) can do that. Do B2 before a `--writes safe` run. If the board is claimed
+   by another key, E1 stops the run with exit 15 and nothing is sent; the plan's ANNOUNCE.txt
+   says so in a `claim` line.
 6. **Pace:** `--gap` between commands, `--interval` of at least 60 s, back-offs, no loops.
 
 ## The evidence

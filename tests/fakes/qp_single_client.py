@@ -181,7 +181,7 @@ class SingleClientFront:
                 with self._mu:
                     self._decide("refused")
                 continue
-            threading.Thread(target=self._serve, args=(conn, active), daemon=True).start()
+            threading.Thread(target=self._serve, args=(conn, active, addr[0]), daemon=True).start()
 
     def _decide(self, outcome: str) -> None:
         """Record a connect's outcome (``_mu`` held) and wake ``transport``'s waiters."""
@@ -193,7 +193,9 @@ class SingleClientFront:
             conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
         conn.close()
 
-    def _serve(self, conn: socket.socket, rec: Conn) -> None:
+    def _serve(self, conn: socket.socket, rec: Conn, peer: str = "127.0.0.1") -> None:
+        # ``peer``: where the client really connected from. The claim forward leaves from the
+        # board's own loopback (``claimed_lock.TRUSTED``), so the shell's claim gate lets it in.
         buf = b""
         conn.settimeout(0.05)
         try:
@@ -220,7 +222,7 @@ class SingleClientFront:
                     if self.reply_delay_s:
                         time.sleep(self.reply_delay_s)
                     reply = self.shell.handle_control(
-                        {k: v for k, v in req.items() if k != "soak"}, peer="127.0.0.1") \
+                        {k: v for k, v in req.items() if k != "soak"}, peer=peer) \
                         if isinstance(req, dict) else {"ok": False, "err": "malformed"}
                     conn.sendall(json.dumps(reply, separators=(",", ":")).encode() + b"\n")
                     rec.requests.append((t_in, time.monotonic(), op))

@@ -128,7 +128,7 @@ def test_update_status_reads_the_files_with_no_daemon(rig, capsys, monkeypatch, 
 
     previous = set_engine_factory(lambda _args: rig["eng"])
     try:
-        rig["app"].stage(*_release(tmp_path, "1.2.0"))
+        rig["app"].stage(*_release(tmp_path, "99.0.0"))
         rig["app"].mark_bad("1.1.1", "exited 2 s after it answered", phase="stable")
         su.write_json(su.last_apply_path(rig["sd"]), {"id": "x", "from": __version__,
                                                       "to": "1.1.1", "result": "rolled-back",
@@ -136,7 +136,7 @@ def test_update_status_reads_the_files_with_no_daemon(rig, capsys, monkeypatch, 
         rc, out, err = run(capsys, monkeypatch, "--json", "update", "status")
         assert rc == 0, err
         body = json.loads(out)
-        assert body["staged"] == ["1.2.0"] and "1.1.1" in body["bad"]
+        assert body["staged"] == ["99.0.0"] and "1.1.1" in body["bad"]
         assert body["effective"]["auto"] == "stage" and body["daemon"]["state"] == "stopped"
         assert body["last_apply"]["result"] == "rolled-back"
         rc, out, _ = run(capsys, monkeypatch, "update", "status")
