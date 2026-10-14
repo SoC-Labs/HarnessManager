@@ -812,6 +812,7 @@ function AnsweredLine({ bid, id, a }) {
         : `You answered ${a.by}: keep ${board} for ${a.minutes} min${a.message ? "" : "."}`}</strong>${a.answer === "keep" && a.message
         ? html` ${quoted(a.message)}` : null}
       ${until ? html` <span class="secondary">They may force-release it after ${clock(until)}.</span>` : null}
+      ${until && a.answer === "keep" && until * 1000 > Date.now() ? html` <span class="lease-fact" data-testid="keeping-for">${LEASE_WORDS.keepingFor(minutesLeft(until - Date.now() / 1000), a.by)}</span>` : null}
       ${p.lines.length ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="result-lease_respond" />` : null}
     </div>
     <button type="button" class="btn ghost sm icon-only" aria-label="Close this answer" title="Close"

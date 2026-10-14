@@ -1651,6 +1651,21 @@ class LeaseService:
             if here:
                 out["incoming"] = self._incoming_list(hub, notes, principal, queue,
                                                       has_queue=hasattr(shown, "queue"))
+        if out["lease"] is not None and here:
+            # A Keep is binding on a board (heartbeats cannot push past it): when it ends, and
+            # who asked, so the page can show "Keeping it for N min (asked by ...)".
+            now = self._wall()
+            best: tuple[float, dict[str, Any]] | None = None
+            for inc in out["incoming"]:
+                ans = inc.get("answer") or {}
+                at = parse_utc(ans.get("at"))
+                mins = int(ans.get("minutes") or 0)
+                if ans.get("answer") == "keep" and at is not None and mins:
+                    end = at + 60 * mins
+                    if end > now and (best is None or end > best[0]):
+                        best = (end, inc)
+            if best is not None:
+                out["lease"].update(kept_until=iso_utc(best[0]), kept_by=best[1].get("by", ""))
         if out["lease"] is not None:
             req = out["request"]
             kind, why = holder_kind(req.get("answer") if req else None, asked=req is not None,
