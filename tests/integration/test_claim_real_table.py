@@ -169,7 +169,7 @@ def test_a_lost_claim_reply_is_not_retried_through_the_tunnel(lab, verb):  # noq
     with pytest.raises(ClaimLockedError) as exc:
         VERBS[verb](rig)
     assert exc.value.message.startswith(LOST_CLAIM_WORDS), exc.value.message
-    assert "serial console" in exc.value.message and "Adopt this board" in exc.value.message
+    assert "mps3-reclaim --reopen" in exc.value.message and "Claim this board" in exc.value.message
     # HM thought the claim was ours, so the ONE attempt rode the forward; the lost-claim reply is
     # final: no second attempt, no second forward
     assert sent(rig, verb) == [TRUSTED] and len(rig.ssh.board_launches()) == 1, rig.control

@@ -230,7 +230,7 @@ def test_a_board_that_lost_its_claim_on_restart_says_so_and_is_not_claimed_again
     st = status_of(rig)
     assert st["state"] == "unclaimed"
     assert st["lost"]["message"] == LOST_CLAIM_WORDS
-    assert "serial console" in LOST_CLAIM_WORDS and "Adopt this board" in LOST_CLAIM_WORDS
+    assert "mps3-reclaim --reopen" in LOST_CLAIM_WORDS and "Claim this board" in LOST_CLAIM_WORDS
     assert "from this PC" not in LOST_CLAIM_WORDS and LOST_CLAIM_WORDS in st["notes"]
     assert CL.ClaimRecords().get(rig.board_id).get("key_fp") == before.get("key_fp")
     assert rig.ssh.board_launches() == [] and rig.fake.ssh_claimed is False   # nothing re-claimed
