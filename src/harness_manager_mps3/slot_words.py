@@ -175,11 +175,12 @@ CLAIM_LOCK_HINT = ("the board's SSH is claimed (the claim lock, not the identity
 #: This marker is the ONE place Harness Manager reads the err text: a sub-case of ``locked``.
 CLAIM_LOST_MARKER = "claim lost on reboot"
 LOST_CLAIM_WORDS = ("The board lost its claim when it restarted (it has no card to keep it). "
-                    "Re-claim it from the board's serial console, then adopt it here "
-                    "(Board \u2192 Access \u2192 Adopt this board).")
-LOST_CLAIM_HINT = ("on the board's serial console: `mps3-reclaim KEYFILE`; then adopt it here: "
-                   "`harness-manager board claim TARGET --adopt`, or Board \u2192 Access \u2192 "
-                   "Adopt this board")
+                    "On the board's Linux console run `mps3-reclaim --reopen`, then claim it "
+                    "again here (Board \u2192 Access \u2192 Claim this board).")
+LOST_CLAIM_HINT = ("the board's Linux console is FPGA UART lane 2 (tty_02 through a hub; the root "
+                   "password is needed), not the MCC port: run `mps3-reclaim --reopen` there, then "
+                   "`harness-manager board claim TARGET` or Board \u2192 Access \u2192 Claim this "
+                   "board")
 
 
 def is_claim_lost(err: str, code: str = "") -> bool:

@@ -1751,11 +1751,12 @@ single-user mode.
 If the board is claimed by a key this Harness Manager does not have, the change is refused
 before anything is sent, with the claim's plain words; if the claim is yours, `board claim
 TARGET --adopt`. If the board lost its claim in the meantime, Harness Manager says so: "The
-board lost its claim when it restarted (it has no card to keep it). Re-claim it from the
-board's serial console, then adopt it here (Board → Access → Adopt this board)." That
-happens to a board with no user microSD when it restarts. A board in this state refuses
-changes from the network until it is re-claimed, so nobody else can grab it: on the board's
-serial console run `mps3-reclaim KEYFILE` with your public key, then press **Adopt this
+board lost its claim when it restarted (it has no card to keep it). On the board's Linux console
+run `mps3-reclaim --reopen`, then claim it again here (Board → Access → Claim this board)."
+That happens to a board with no user microSD when it restarts. A board in this state
+refuses changes from the network until it is re-claimed, so nobody else can grab it. The
+Linux console is the board's FPGA UART lane 2 (through a hub: `tty_02`; you need the root
+password), not the MCC port: run `mps3-reclaim --reopen` there, then press **Claim this
 board** in Board > Access and carry on.
 
 ### 12.2 The user microSD

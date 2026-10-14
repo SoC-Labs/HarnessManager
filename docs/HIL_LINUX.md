@@ -1022,9 +1022,10 @@ evidence to `$EV/su_*.txt` as in section 0.1.
 13. **A card-less board, 5 min, only if one is free (never board 2: it is the workshop
     demo).** Switch on, restart the board, expect **Shared** after boot and, on the PC that
     claimed it, the words "The board lost its claim when it restarted (it has no card to keep
-    it). Re-claim it from the board's serial console, then adopt it here (Board → Access →
-    Adopt this board)." on any changing action, with no retry through SSH. Then
-    `mps3-reclaim KEYFILE` on the serial console and **Adopt this board**.
+    it). On the board's Linux console run `mps3-reclaim --reopen`, then claim it again here
+    (Board → Access → Claim this board)." on any changing action, with no retry through SSH.
+    Then `mps3-reclaim --reopen` on the Linux console (FPGA UART lane 2, tty_02 through a hub)
+    and **Claim this board**.
 
 If a step fails, keep the evidence file, switch the board back to Shared (touchscreen, if the
 app cannot), and write the step number and the first refused line in the report.
