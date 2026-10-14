@@ -81,6 +81,8 @@ def test_wire_names_are_pyverifys_stub_names():
     assert BL.CODES == ("leased", "lease_required", "lease_held", "bad_token", "queue_full",
                         "local_hold", "not_holder", "busy_access")
     assert (BL.FEATURE, BL.MODE_OPEN, BL.MODE_SINGLE) == ("board_lease", "open", "single_user")
+    assert (BL.VERB, BL.TOKEN_KEY, BL.PANEL_EVENT_BREAK, BL.PANEL_EVENT_ARM) == (
+        "lease", "lease", "lease_break", "access_arm")
     assert BL.NO_KEY_WORDS == ("Your key is not on this board. Ask its owner to add it "
                                "(Board > Access > Board keys).")
 
@@ -107,7 +109,9 @@ def test_every_write_act_rides_the_claim_forward_on_a_board_we_claimed(rig_of):
     client.put_answer(ServiceAnswerNote(rid, "keep", 5, "", ""))               # respond
     client.delete_request("n1")                                                # cancel
     client.lease_release(token, ME)                                            # release
-    client.lease_acquire(ME, ttl=60)                                           # acquire
+    client.lease_acquire(ME, ttl=600)                                          # acquire
+    client.put_request(ServiceRequestNote("n2", OTHER, "bob", "pc2", "now?", "", ""))
+    srv.tick(121)                                    # the holder let the request window pass
     client.lease_revoke("test")                                                # revoke
     wrote = [(a) for a, _ in srv.acts if a not in ("show", "history")]
     assert set(wrote) == {"mode", "heartbeat", "request", "respond", "cancel", "release",
@@ -121,14 +125,14 @@ def test_every_write_act_rides_the_claim_forward_on_a_board_we_claimed(rig_of):
 def test_twin_writes_on_an_unclaimed_board_go_direct(rig_of):
     rig, srv, client = rig_of(claimed=False, pinned=True, observed=False)
     srv.mode = "single_user"
-    client.lease_acquire(ME, ttl=60)
+    client.lease_acquire(ME, ttl=300)
     assert lease_peers(rig, "acquire") == [HUB_SIDE] and rig.ssh.board_launches() == []
 
 
 def test_a_stale_decision_is_retried_once_through_the_forward(rig_of):
     rig, srv, client = rig_of(pinned=True, observed=False)   # HM thinks unclaimed; the board is not
     srv.mode = "single_user"
-    client.lease_acquire(ME, ttl=60)
+    client.lease_acquire(ME, ttl=300)
     assert lease_peers(rig, "acquire") == [HUB_SIDE, TRUSTED]
     assert rig.fake.gated == [("lease", HUB_SIDE)]
 
@@ -137,7 +141,7 @@ def test_a_keyless_peer_gets_the_no_key_words_and_nothing_is_sent(rig_of):
     rig, srv, client = rig_of(observed=True)                 # claimed by a key that is not ours
     srv.mode = "single_user"
     with pytest.raises(ClaimLockedError) as exc:
-        client.lease_acquire(ME, ttl=60)
+        client.lease_acquire(ME, ttl=300)
     assert exc.value.message == BL.NO_KEY_WORDS
     assert lease_peers(rig, "acquire") == [] and rig.ssh.board_launches() == []
     with pytest.raises(ClaimLockedError) as exc2:
@@ -149,7 +153,7 @@ def test_the_unclaimed_board_cannot_switch_single_user_mode_on(rig_of):
     rig, srv, client = rig_of(claimed=False, pinned=True, observed=False)
     with pytest.raises(HeldError) as exc:
         client.set_mode(True, take=True)
-    assert "claim the board first" in exc.value.message and exc.value.code_text == "not_holder"
+    assert "only the owner key" in exc.value.message and exc.value.code_text == "denied"
     assert srv.mode == "open"
 
 
@@ -174,10 +178,13 @@ def test_mode_off_by_a_non_holder_needs_the_boards_name(rig_of):
     client.set_mode(True, take=True)
     other = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="mps3-01", who=OTHER,
                                 clock=lambda: NOW)          # a second PC: no token
+    owner_key = srv._claimed
+    srv._claimed = lambda: False                           # off is the owner's or the holder's
     with pytest.raises(HeldError) as exc:
         other.set_mode(False)
     assert exc.value.code_text == "not_holder"
-    other.set_mode(False, confirm_board="mps3-01")
+    srv._claimed = owner_key                               # the owner's key: no token needed
+    other.set_mode(False)
     assert srv.mode == "open" and srv.holder is None
 
 
@@ -196,7 +203,7 @@ def test_acquire_heartbeat_release(rig_of):
 def test_heartbeat_with_a_lost_token_is_lease_lost(rig_of):
     rig, srv, client = ours(rig_of)
     srv.mode = "single_user"
-    grant, _ = client.lease_acquire(ME, ttl=60)
+    grant, _ = client.lease_acquire(ME, ttl=300)
     srv.holder["token"] = "f" * 32                           # someone else holds it now
     with pytest.raises(LeaseLostError) as lost:
         client.lease_heartbeat(grant.token, ME)
@@ -210,8 +217,8 @@ def test_heartbeat_with_a_lost_token_is_lease_lost(rig_of):
 def test_the_lease_lapses_when_the_ttl_passes(rig_of):
     rig, srv, client = ours(rig_of)
     srv.mode = "single_user"
-    grant, _ = client.lease_acquire(ME, ttl=60)
-    srv.tick(61)
+    grant, _ = client.lease_acquire(ME, ttl=300)
+    srv.tick(301)
     with pytest.raises(LeaseLostError) as gone:
         client.lease_heartbeat(grant.token, ME)
     assert gone.value.state == "expired"
@@ -233,9 +240,12 @@ def test_acquire_polls_while_queued_and_logs_the_position(rig_of):
     grant, expires = client.lease_acquire(ME, ttl=600, poll_s=7.0, sleep=nap, log_fn=logs.append)
     assert logs == ["queued at position 1", "queued at position 1"]
     assert all((m := _QUEUED.search(t)) and m.group(1) == "1" for t in logs)
-    assert naps == [7.0, 7.0] and srv.holder["who"] == ME and grant.token == srv.holder["token"]
+    # the queue head polls inside its 120 s reservation: every POLL_HEAD_S, not every poll_s
+    assert naps == [BL.POLL_HEAD_S] * 2 and srv.holder["who"] == ME
+    assert grant.token == srv.holder["token"]
     acquires = [r for a, r in srv.acts if a == "acquire" and r.get("who") == ME]
-    assert "token" not in acquires[0] and acquires[1]["token"] == acquires[2]["token"] == grant.token
+    assert len(acquires) == 3 and all("token" not in r for r in acquires)   # known by who
+    assert all(r["app"] == "Harness Manager" and r["ttl_s"] == 600 for r in acquires)
 
 
 def test_acquire_that_waits_too_long_leaves_the_queue_and_says_so(rig_of):
@@ -256,24 +266,33 @@ def test_a_full_queue_and_a_local_hold_are_refused_in_the_boards_words(rig_of):
     BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW
                         ).lease_acquire(OTHER, ttl=600)
     for i in range(4):
-        srv.queue.append({"id": f"q{i}", "who": f"w{i}", "msg": "", "at": srv.now,
-                          "token": "a" * 32})
+        srv.queue.append({"id": f"q{i}", "who": f"w{i}", "msg": "", "at": srv.now})
     with pytest.raises(HeldError) as full:
-        client.lease_acquire(ME, ttl=60)
-    assert full.value.code_text == "queue_full" and "queue is full" in full.value.message
+        client.lease_acquire(ME, ttl=300)
+    assert full.value.code_text == "queue_full" and "queue full" in full.value.message
     srv.local_break()
-    with pytest.raises(HeldError) as hold:
-        client.lease_acquire(ME, ttl=60)
+    with pytest.raises(HeldError) as hold:                    # the hold bars switching it on
+        client.set_mode(True, take=True)
     assert hold.value.code_text == "local_hold"
 
 
-def test_cancel_removes_the_queue_place(rig_of):
+def test_cancel_removes_the_queue_place_by_the_id_acquire_returned(rig_of):
     rig, srv, client = ours(rig_of)
     srv.mode = "single_user"
     BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW
-                        ).lease_acquire(OTHER, ttl=60)
-    srv.queue.append({"id": "rq", "who": ME, "msg": "", "at": srv.now, "token": "b" * 32})
-    assert client.lease_cancel(ME) is True and client.lease_cancel(ME) is False
+                        ).lease_acquire(OTHER, ttl=300)
+    assert client.lease_cancel(ME) is False                  # never queued: nothing to cancel
+    naps: list[float] = []
+
+    def nap(seconds: float) -> None:
+        naps.append(seconds)
+        if len(srv.queue) == 1:                              # queued: give up (a UI cancel)
+            assert client.lease_cancel(ME) is True
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        client.lease_acquire(ME, ttl=300, sleep=nap)
+    assert srv.queue == [] and client.lease_cancel(ME) is False
 
 
 def test_show_status_and_queue_use_absolute_times_on_our_clock(rig_of):
@@ -323,23 +342,27 @@ def test_a_non_holder_cannot_answer(rig_of):
     assert exc.value.code_text in ("bad_token", "not_holder")
 
 
-def test_force_release_needs_the_boards_name_and_leaves_a_reason(rig_of):
+def test_force_release_needs_the_boards_label_and_an_unanswered_request(rig_of):
     rig, srv, client = ours(rig_of)
     srv.mode = "single_user"
-    grant, _ = client.lease_acquire(OTHER, ttl=600)
+    other = BL.BoardLeaseClient(rig.session, board=rig.board_id, name="m", clock=lambda: NOW)
+    other.lease_acquire(OTHER, ttl=600)
+    client.put_request(ServiceRequestNote("n1", ME, "me", "pc1", "force test", "", ""))
+    with pytest.raises(HeldError) as busy:                  # the holder still has its window
+        client.lease_revoke("force-released by me via Harness Manager: no answer")
+    assert busy.value.code_text == "busy"
+    srv.tick(121)
     out = client.lease_revoke("force-released by me via Harness Manager: no answer")
     assert out["revoked"] == [rig.board_id] and out["prior_holder"] == OTHER
     assert srv.holder is None
+    sent = srv.acts[-1][1]
+    assert sent["confirm"] == "mps3-01" and "reason" not in sent and "confirm_board" not in sent
     taken = BL.taken_from_history(client.lease_history(), OTHER)
-    assert taken["reason"].startswith("force-released") and taken["by"] == "owner"
-    again = client.lease_revoke("nothing there")
-    assert again["revoked"] == []
+    assert taken is not None and taken["at"]
     client.name = "wrong"
-    srv.holder = {"who": OTHER, "app": "", "token": grant.token, "at": srv.now,
-                  "expires": srv.now + 60}
     with pytest.raises(HeldError) as exc:
         client.lease_revoke("x")
-    assert exc.value.code_text == "not_holder"
+    assert exc.value.code_text == "invalid"
 
 
 def test_a_touchscreen_break_is_someone_at_the_board(rig_of):
@@ -362,7 +385,7 @@ def test_a_touchscreen_break_is_someone_at_the_board(rig_of):
 def test_taken_from_history_is_none_for_an_expiry_or_our_own_acquire(rig_of):
     rig, srv, client = ours(rig_of)
     srv.mode = "single_user"
-    client.lease_acquire(ME, ttl=60)
+    client.lease_acquire(ME, ttl=300)
     assert BL.taken_from_history(client.lease_history(), ME) is None
     srv.tick(61)
     srv.op({"op": "lease", "act": "show"})
@@ -381,11 +404,13 @@ def test_the_holder_sends_its_token_on_a_gated_verb_over_the_forward(rig_of):
     assert [p for o, _a, p in rig.control if o == "reset"][-1] == TRUSTED     # the forwarded shell too
 
 
-def test_reads_never_carry_the_token(rig_of):
+def test_the_token_rides_every_request_but_hello(rig_of):
     rig, srv, client = ours(rig_of)
-    client.set_mode(True, take=True)
+    res = client.set_mode(True, take=True)
     rig.session.shell.call(lambda c: c.ping())
-    assert all("lease" not in r for r in srv.seen if r.get("op") in ("ping", "version", "stats"))
+    pings = [r for r in srv.seen if r.get("op") == "ping"]
+    assert pings[-1].get("lease") == res.token                     # ignored on READ rows
+    assert all("lease" not in r for r in srv.seen if r.get("op") == "hello")
 
 
 def test_open_mode_adds_nothing_and_needs_nothing(rig_of):

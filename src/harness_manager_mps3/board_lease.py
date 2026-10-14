@@ -7,14 +7,17 @@ and ``principal``/``board_id``/``lease_revoke``/``lease_history``), so ``LeaseSe
 board exactly as it drives a hub. ``Mps3BoardLease`` is the ``services.lease_backend.LeaseServer``
 adapter (``session.lease``; ``Mps3Pack`` hook ``board_lease:make_lease_adapter``).
 
-Wire (names are pyverify's ``board_lease.py``, F0 stubs, ``mps3-r3-f0py``; vendored pyverify
-does not have them yet, so they are mirrored here and NOT imported):
+Wire: net-protocol v0.21 "Board lease and panel access" (frozen). The names are pyverify's
+``board_lease.py`` (platform bdf73539) and are mirrored in the ONE block below ("the wire"),
+not imported (the vendored pyverify does not carry them). Every other name in this module is
+Harness Manager's own.
 
     request   ``{"op":"lease","act":ACT, ...}``; every time on the wire is RELATIVE seconds
               (``ttl_s``, ``expires_in_s``, ``age_s``): HM computes absolute times on its own clock.
     gated verbs carry a top-level ``"lease": "<32 hex>"`` while this HM holds the lease
-              (``shell.board_lease_preamble``); heartbeat/release/respond carry it too.
-    refusal   ``{"ok":false,"err":"...","code":CODE}``.
+              (``shell.board_lease_preamble``); heartbeat/release/respond/mode carry it too.
+    refusal   ``{"ok":false,"err":"...","code":CODE}``. A QUEUED acquire is not a refusal: it is
+              ``ok:true, granted:false, position, id, code:"lease_held"``.
 
 Act -> transport (the claim gate comes first, then the lease: "claim first, then lease"):
 
@@ -26,9 +29,7 @@ Act -> transport (the claim gate comes first, then the lease: "claim first, then
                                         HM holds the claim, refused in plain words otherwise
                                         (a keyless peer never gets a write in)
 
-The request/reply field names beyond the act list are not in the F0 stubs (contract v0.21 text
-is -f9's); the shapes used are the stubs' dataclasses (``LeaseView``, ``Holder``, ``Waiter``,
-``AcquireResult``) and are all read through ``dict.get`` so a board that adds fields keeps working.
+Replies are read through ``dict.get`` so a board that adds fields keeps working.
 """
 from __future__ import annotations
 
@@ -66,9 +67,11 @@ from .shell import set_lease_token_source
 
 log = logging.getLogger(__name__)
 
-# --- wire names, mirrored from pyverify board_lease.py (mps3-r3-f0py) ----------------------------
+# --- the wire: EVERY name from net-protocol v0.21 lives here (future drift = one edit) -------------
 
-FEATURE = "board_lease"
+FEATURE = "board_lease"                  # engine feature name (hello / identify features)
+FEATURE_PANEL_ACCESS = "panel_access"
+VERB = "lease"
 ACTS = ("show", "history", "acquire", "heartbeat", "release", "request", "respond", "cancel",
         "revoke", "mode")
 #: Acts that read (6900 direct); every other act is a write (the claim route).
@@ -76,13 +79,60 @@ READ_ACTS = ("show", "history")
 MODE_OPEN = "open"
 MODE_SINGLE = "single_user"
 CODES = ("leased", "lease_required", "lease_held", "bad_token", "queue_full", "local_hold",
-         "not_holder", "busy_access")
-DEFAULT_TTL_S = 3600
-REQUEST_WINDOW_S = 120
+         "not_holder", "busy_access")                  # pyverify's CODES
+#: Codes the contract names beyond pyverify's tuple (verb refusals).
+CODES_MORE = ("denied", "busy", "invalid", "not_supported", "locked")
+CODE_QUEUED = "lease_held"               # on a queued acquire (ok:true, granted:false)
+TOKEN_KEY = "lease"                      # top-level token key on gated verbs and holder acts
 TOKEN_HEX = 32
 
-#: What the board's history calls a lease ended at the touchscreen (panel event ``lease_break``).
-BREAK_EVENTS = ("lease_break", "broken_local", "lease.broken_local")
+#: Request fields, per act (besides ``op``/``act``/``lease``).
+F_WHO, F_APP, F_TTL = "who", "app", "ttl_s"          # acquire (ttl 300-14400); heartbeat: ttl_s
+F_N = "n"                                            # history, 1-8
+F_MSG, F_ID = "msg", "id"                            # request (msg <= 48); respond/cancel (id)
+F_ACCEPT, F_MINUTES = "accept", "minutes"            # respond (minutes 5-60 when accept is false)
+F_CONFIRM = "confirm"                                # revoke: the board's label
+F_MODE = "mode"                                      # mode
+MSG_MAX = 48
+HISTORY_MAX = 8
+TTL_MIN_S, TTL_MAX_S = 300, 14400
+KEEP_MIN, KEEP_MAX = 5, 60
+
+#: Reply fields.
+R_MODE, R_PERSISTENT = "mode", "persistent"
+R_HOLDER, R_QUEUE = "holder", "queue"
+R_LOCAL_HOLD, R_RECLAIM = "local_hold_s", "reclaim_s"
+R_TOKEN, R_EXPIRES, R_GRANTED = "token", "expires_in_s", "granted"
+R_POSITION, R_ID, R_EVENTS = "position", "id", "events"
+H_WHO, H_APP, H_HELD, H_EXPIRES, H_YOU = "who", "app", "held_s", "expires_in_s", "you"
+W_ID, W_WHO, W_MSG, W_AGE = "id", "who", "msg", "age_s"
+E_EV, E_WHO, E_AGE, E_INFO = "ev", "who", "age_s", "info"
+
+#: History events (``ev``) -> the hub-shaped event name HM's lease code reads.
+HISTORY_EVENTS = {
+    "grant": "lease.acquired", "queue": "lease.queued", "renew": "lease.renewed",
+    "release": "lease.released", "expire": "lease.expired", "idle": "lease.expired",
+    "cap": "lease.expired", "reserve": "lease.reserved", "request": "lease.requested",
+    "give": "lease.given", "keep": "lease.kept", "cancel": "lease.cancelled",
+    "revoke": "lease.admin_revoked", "mode_on": "lease.mode_on", "mode_off": "lease.mode_off",
+    "break": "lease.broken_local", "suspend": "lease.suspended", "reclaim": "lease.reclaimed",
+    "clear": "lease.cleared",
+}
+EV_GIVE, EV_KEEP, EV_BREAK = "give", "keep", "break"
+
+#: Panel events (``panel`` / ``hello`` ``events``, ``k``) of the touchscreen override.
+PANEL_EVENT_ARM = "access_arm"
+PANEL_EVENT_BREAK = "lease_break"
+#: Names that mean "the lease ended at the touchscreen" (history ``break``, panel ``lease_break``,
+#: and HM's own hub-shaped ``lease.broken_local``).
+BREAK_EVENTS = (EV_BREAK, PANEL_EVENT_BREAK, "lease.broken_local")
+
+#: Timers (the board is the authority; these are the defaults HM plans around).
+DEFAULT_TTL_S = 3600
+REQUEST_WINDOW_S = 120                   # the holder's time to answer a request
+RESERVE_S = 120                          # the queue head's reservation when the holder goes
+POLL_HEAD_S = 5.0                        # acquire poll while first in the queue (inside RESERVE_S)
+
 TOUCH_BY = "someone at the board"
 TOUCH_REASON = "single-user mode was switched off on the touchscreen"
 
@@ -150,7 +200,7 @@ def refusal(reply: dict[str, Any], what: str) -> HarnessError:
     if code == "locked":
         exc = ClaimLockedError(err, hint=hint)
     else:
-        exc = HeldError(err, holder=_text(reply.get("holder")), hint=hint)
+        exc = HeldError(err, holder=_text(reply.get(R_HOLDER)), hint=hint)
     exc.code_text = code          # type: ignore[attr-defined]  # ExitCode stays on .code
     exc.reply = reply             # type: ignore[attr-defined]
     return exc
@@ -189,6 +239,8 @@ class BoardLeaseClient:
         self._ttl_s = DEFAULT_TTL_S
         self._principal = ""
         self._requests: dict[str, str] = {}      # our note id -> the board's request id
+        self._requested_at: dict[str, float] = {}    # our note id -> monotonic time it was asked
+        self._queue_id = ""                      # our place in the queue (acquire's ``id``)
         if token_source is not None:
             self._register()
 
@@ -234,7 +286,7 @@ class BoardLeaseClient:
     def _msg(self, act: str, **fields: Any) -> dict[str, Any]:
         if act not in ACTS:
             raise UsageError(f"unknown board lease act {act!r}")
-        return {"op": "lease", "act": act, **{k: v for k, v in fields.items() if v is not None}}
+        return {"op": VERB, "act": act, **{k: v for k, v in fields.items() if v is not None}}
 
     def _read(self, act: str, **fields: Any) -> dict[str, Any]:
         """A read act over 6900 direct. The board's refusal is raised; the reply returned."""
@@ -247,7 +299,7 @@ class BoardLeaseClient:
         top-level ``"lease"`` (the holder's token). ``raw``: a refusal reply is returned, not raised."""
         msg = self._msg(act, **fields)
         if lease:
-            msg["lease"] = lease
+            msg[TOKEN_KEY] = lease
         what = f"board lease {act}"
         try:
             if self.session is None:
@@ -279,58 +331,58 @@ class BoardLeaseClient:
 
     def show(self) -> dict[str, Any]:
         """The board's lease table, raw (``lease show``)."""
-        return self._read("show", lease=self.current_token() or None)
+        return self._read("show", **{TOKEN_KEY: self.current_token() or None})
 
     def mode(self) -> LeaseMode:
         return self._mode_of(self.show())
 
     @staticmethod
     def _mode_of(reply: dict[str, Any]) -> LeaseMode:
+        """The mode from a ``show``-keyed reply. The wire carries no owner/can_change flag: the
+        board decides (``denied``), so a change is offered unless the touchscreen hold bars it."""
+        hold = _int(reply.get(R_LOCAL_HOLD))
+        single = _text(reply.get(R_MODE)) == MODE_SINGLE
+        barred = hold > 0 and not single
         return LeaseMode(
-            single_user=_text(reply.get("mode")) == MODE_SINGLE,
-            can_change=bool(reply.get("can_change", False)),
-            change_reason=_text(reply.get("change_reason")),
-            since_s=_int(reply.get("since_s")), by=_text(reply.get("by")),
-            persisted=bool(reply.get("persisted", True)),
-            local_hold_s=_int(reply.get("local_hold_s")))
+            single_user=single, can_change=not barred,
+            change_reason=(f"single-user mode was switched off at the board; it can be switched "
+                           f"on again in {hold} s" if barred else ""),
+            persisted=reply.get(R_PERSISTENT) is not False, local_hold_s=hold)
 
     def lease_show(self) -> LeaseView:
         reply = self.show()
-        held = _obj(reply.get("holder"))
-        who = _text(held.get("who"))
-        expires = iso(self._wall() + _int(held.get("expires_in_s"))) if who else ""
+        held = _obj(reply.get(R_HOLDER))
+        who = _text(held.get(H_WHO))
+        expires = iso(self._wall() + _int(held.get(H_EXPIRES))) if who else ""
         return LeaseView(target=self.board, held=bool(who), holder=who, user=who,
                          expires_at=expires, raw=str(reply))
 
     def lease_status(self) -> LeaseStatus:
         """The holder and the queue, head first (the queue is the board's waiting requesters)."""
         reply = self.show()
-        held = _obj(reply.get("holder"))
-        who = _text(held.get("who"))
+        held = _obj(reply.get(R_HOLDER))
+        who = _text(held.get(H_WHO))
         self._note_you(held, reply)
-        queue = tuple(QueueEntry(position=i + 1, holder=_text(w.get("who")), user=_text(w.get("who")))
-                      for i, w in enumerate(w for w in reply.get("queue") or [] if isinstance(w, dict)))
+        queue = tuple(QueueEntry(position=i + 1, holder=_text(w.get(W_WHO)), user=_text(w.get(W_WHO)))
+                      for i, w in enumerate(w for w in reply.get(R_QUEUE) or [] if isinstance(w, dict)))
         return LeaseStatus(
             held=bool(who), holder=who, user=who,
-            expires_at=iso(self._wall() + _int(held.get("expires_in_s"))) if who else "",
+            expires_at=iso(self._wall() + _int(held.get(H_EXPIRES))) if who else "",
             queue=queue)
 
     def lease_queues(self) -> LeaseStatus:
         return self.lease_status()
 
-    def _note_you(self, held: dict[str, Any], reply: dict[str, Any]) -> None:
-        you = _text(reply.get("you"))
-        if not you and held.get("you") is True:
-            you = _text(held.get("who"))
-        if you:
-            self._principal = you
+    def _note_you(self, held: dict[str, Any], _reply: dict[str, Any] | None = None) -> None:
+        if held.get(H_YOU) is True and _text(held.get(H_WHO)):
+            self._principal = _text(held.get(H_WHO))
 
     def principal(self) -> str:
         """Who the board records this client's lease under: its ``you`` in ``show``, else the
         holder name it was last granted under, else the name asked for."""
         if not self._principal:
             reply = self.show()
-            self._note_you(_obj(reply.get("holder")), reply)
+            self._note_you(_obj(reply.get(R_HOLDER)), reply)
         return self._principal or self.who
 
     def board_id(self) -> str:
@@ -338,25 +390,23 @@ class BoardLeaseClient:
 
     def lease_history(self, limit: int = 50) -> list[dict[str, Any]]:
         """The board's recent lease events, oldest first, shaped like the hub's (``event``
-        ``lease.*``, ``holder``, ``ts`` absolute on HM's clock). A revoke is a
-        ``lease.admin_revoked`` with ``prior_holder``, ``by`` and ``reason``; a lease ended at
-        the touchscreen is ``lease.broken_local``."""
-        reply = self._read("history", n=max(1, min(int(limit), 500)))
+        ``lease.*`` via ``HISTORY_EVENTS``, ``holder``, ``ts`` absolute on HM's clock). The board
+        keeps the last ``HISTORY_MAX`` (8). A ``revoke`` is a ``lease.admin_revoked`` with
+        ``prior_holder``; a lease ended at the touchscreen is ``break`` -> ``lease.broken_local``."""
+        reply = self._read("history", **{F_N: max(1, min(int(limit), HISTORY_MAX))})
         now = self._wall()
         out: list[dict[str, Any]] = []
-        for e in reply.get("events") or []:
+        for e in reply.get(R_EVENTS) or []:
             if not isinstance(e, dict):
                 continue
-            kind = _text(e.get("event") or e.get("kind"))
-            who = _text(e.get("who") or e.get("holder"))
-            ev: dict[str, Any] = {"ts": iso(now - _int(e.get("age_s"))), "holder": who,
-                                  "reason": _text(e.get("reason")), "by": _text(e.get("by"))}
-            if kind in BREAK_EVENTS:
-                ev["event"] = "lease.broken_local"
-            elif kind in ("revoke", "revoked", "lease.revoked", "lease.admin_revoked"):
-                ev.update(event="lease.admin_revoked", prior_holder=_text(e.get("prior") or who))
-            else:
-                ev["event"] = kind if kind.startswith("lease.") else f"lease.{kind}"
+            kind = _text(e.get(E_EV))
+            who = _text(e.get(E_WHO))
+            info = _text(e.get(E_INFO))
+            ev: dict[str, Any] = {"ts": iso(now - _int(e.get(E_AGE))), "holder": who,
+                                  "reason": info, "by": "", "ev": kind}
+            ev["event"] = HISTORY_EVENTS.get(kind) or f"lease.{kind}"
+            if kind == "revoke":
+                ev["prior_holder"] = who
             out.append(ev)
         out.sort(key=lambda e: e["ts"])           # ISO UTC sorts by time; stable keeps ties
         return out[-limit:]
@@ -366,28 +416,32 @@ class BoardLeaseClient:
     def lease_acquire(self, holder: str, *, ttl: int, poll_s: float = 20.0,
                       timeout_s: float = 3600.0, sleep: Callable[[float], None] | None = None,
                       log_fn: Callable[[str], None] | None = None) -> tuple[BoardGrant, str]:
-        """Take the lease, polling ``acquire`` (with the ticket the board gave) while queued.
-        Logs ``queued at position N`` each time it is told. Returns ``(grant, expires_at)``."""
+        """Take the lease, polling ``acquire`` while queued (the board knows us by ``who`` and
+        the SSH session, so the same ``who`` is sent each time). A queued reply is
+        ``ok:true, granted:false`` and is not an error. The queue head is RESERVED for
+        ``RESERVE_S`` once the holder goes, so the head polls every ``POLL_HEAD_S``. Logs
+        ``queued at position N``. Returns ``(grant, expires_at)``."""
         wait = sleep or self._sleep
         say = log_fn or (lambda _t: None)
         deadline = self._mono() + timeout_s
-        ticket = ""
         self.who = self.who or holder
+        ttl_wire = max(TTL_MIN_S, min(int(ttl), TTL_MAX_S))
         while True:
-            reply = self._write("acquire", raw=True, who=holder, app=APP, ttl_s=int(ttl),
-                                token=ticket or None)
-            token = _text(reply.get("token"))
-            if reply.get("ok") is not False and reply.get("granted", True) is not False \
+            reply = self._write("acquire", raw=True, **{F_WHO: holder, F_APP: APP, F_TTL: ttl_wire})
+            token = _text(reply.get(R_TOKEN))
+            if reply.get("ok") is not False and reply.get(R_GRANTED) is True \
                     and _TOKEN.fullmatch(token):
                 self._set_token(token)
-                self._ttl_s = int(ttl)
-                self._principal = self._principal or holder
-                left = _int(reply.get("expires_in_s"), int(ttl))
+                self._ttl_s = ttl_wire
+                self._principal = ""             # learned from `show` (holder.you), the board's name
+                self._queue_id = ""
+                left = _int(reply.get(R_EXPIRES), ttl_wire)
                 return BoardGrant(token, left), iso(self._wall() + left)
-            if _text(reply.get("code")) not in ("lease_held",) and reply.get("ok") is False:
+            queued = reply.get("ok") is not False and reply.get(R_GRANTED) is False
+            if not queued:
                 raise refusal(reply, "board lease acquire")
-            pos = _int(reply.get("position") or reply.get("pos"))
-            ticket = token or ticket
+            pos = _int(reply.get(R_POSITION))
+            self._queue_id = _text(reply.get(R_ID)) or self._queue_id
             say(f"queued at position {pos}" if pos else "queued")
             if self._mono() >= deadline:
                 with_cancel = self.lease_cancel(holder)
@@ -395,23 +449,33 @@ class BoardLeaseClient:
                     f"{self.name} was not given back within {int(timeout_s)} s"
                     + ("; the queue place was removed" if with_cancel else ""),
                     hint="ask for the board (Request) or try again later")
-            wait(poll_s)
+            wait(min(poll_s, POLL_HEAD_S) if pos == 1 else poll_s)
 
     def lease_heartbeat(self, token: str, holder: str) -> str:
         """Extend the lease (the acquire's TTL again). Returns the new ``expires_at``. A token
         the board no longer knows is ``LeaseLostError`` (``expired``: nobody holds the board
         any more; ``lost``: someone else does)."""
-        reply = self._write("heartbeat", lease=token, raw=True, ttl_s=self._ttl_s)
+        reply = self._write("heartbeat", lease=token, raw=True, **{F_TTL: self._ttl_s})
         if reply.get("ok") is False:
             code = _text(reply.get("code"))
             if code in ("bad_token", "not_holder", "lease_required", "leased", "lease_held"):
-                state = "expired" if code == "lease_required" else "lost"
+                # The wire says `bad_token` for an expired, released and a taken token alike:
+                # `show` tells them apart (nobody holds the board = expired).
+                state = "lost"
+                if code == "lease_required":
+                    state = "expired"
+                elif code == "bad_token":
+                    try:
+                        state = "lost" if _obj(self.show().get(R_HOLDER)) else "expired"
+                    except HarnessError:
+                        state = "lost"
                 raise LeaseLostError(
                     f"lease heartbeat: the lease on {self.name} is gone "
                     f"({_text(reply.get('err')) or code})", state=state,
                     hint="see who holds it: harness-manager lease show")
             raise refusal(reply, "board lease heartbeat")
-        left = _int(reply.get("expires_in_s"), self._ttl_s)
+        # heartbeat replies with the `show` keys: the new deadline is holder.expires_in_s
+        left = _int(_obj(reply.get(R_HOLDER)).get(H_EXPIRES), self._ttl_s)
         return iso(self._wall() + left)
 
     def lease_release(self, token: str, holder: str) -> None:
@@ -421,48 +485,56 @@ class BoardLeaseClient:
                 self._token = ""
 
     def lease_cancel(self, holder: str) -> bool:
-        """Leave the queue (by name). True when a queue place was removed."""
-        reply = self._write("cancel", raw=True, who=holder)
-        return reply.get("ok") is not False and reply.get("removed", True) is not False
+        """Leave the queue (by the ``id`` the queued ``acquire`` returned). True when a queue
+        place was removed."""
+        qid = self._queue_id
+        if not qid:
+            return False
+        reply = self._write("cancel", raw=True, **{F_ID: qid})
+        self._queue_id = ""
+        return reply.get("ok") is not False
 
     def lease_revoke(self, reason: str) -> dict[str, Any]:
-        """Force-release: the board's owner, with the board's name typed (the service has
-        checked it). Returns what the hub's does: ``{revoked, by, board, prior_holder,
-        reason, principal}``; ``revoked`` is empty when nobody held the board."""
-        before = _obj(self.show().get("holder"))
-        prior = _text(before.get("who"))
+        """Force-release: the queue head, with the board's label typed (the service has checked
+        it; the board only allows it after the head's request went unanswered for
+        ``REQUEST_WINDOW_S``). The wire has no reason or actor: ``reason`` is HM's own note.
+        Returns what the hub's does: ``{revoked, by, board, prior_holder, reason, principal}``;
+        ``revoked`` is empty when nobody held the board."""
+        before = _obj(self.show().get(R_HOLDER))
+        prior = _text(before.get(H_WHO))
         me = self.principal()
-        reply = self._write("revoke", reason=reason, confirm_board=self.name)
-        did = bool(prior) and reply.get("revoked", True) is not False
-        return {"revoked": [self.board] if did else [], "by": _text(reply.get("by")) or me,
+        self._write("revoke", **{F_CONFIRM: self.name})
+        return {"revoked": [self.board] if prior else [], "by": me,
                 "board": self.board, "prior_holder": prior, "reason": reason, "principal": me}
 
     # -- request notes: the board's own requests ------------------------------------------------
 
     def put_request(self, note: RequestNote) -> None:
-        reply = self._write("request", who=note.by, msg=note.message)
-        rid = _text(reply.get("id"))
+        reply = self._write("request", **{F_WHO: note.by, F_MSG: (note.message or "")[:MSG_MAX]})
+        rid = _text(reply.get(R_ID))
         if rid:
             with self._mu:
                 self._requests[note.id] = rid
+                self._requested_at[note.id] = self._mono()
 
     def _waiters(self) -> list[dict[str, Any]]:
-        return [w for w in self.show().get("queue") or [] if isinstance(w, dict)]
+        return [w for w in self.show().get(R_QUEUE) or [] if isinstance(w, dict)]
 
     def list_requests(self) -> list[RequestNote]:
-        """The board's waiting requests, oldest first (notes as the hub's, absolute times)."""
+        """The board's waiting requests, oldest first (notes as the hub's, absolute times). A
+        waiter with ``msg`` ``""`` has no open request. The window is the board's
+        ``REQUEST_WINDOW_S`` from the request."""
         now = self._wall()
         notes: list[RequestNote] = []
         for w in self._waiters():
-            rid = _text(w.get("id"))
-            if not rid:
+            rid = _text(w.get(W_ID))
+            if not rid or not _text(w.get(W_MSG)):
                 continue
-            made = now - _int(w.get("age_s"))
-            who = _text(w.get("who"))
+            made = now - _int(w.get(W_AGE))
+            who = _text(w.get(W_WHO))
             notes.append(RequestNote(
-                id=rid, by=who, user=who, host="", message=_text(w.get("msg")),
-                created_at=iso(made), deadline_at=iso(made + _int(w.get("window_s"), REQUEST_WINDOW_S)),
-                want_s=_int(w.get("want_s"))))
+                id=rid, by=who, user=who, host="", message=_text(w.get(W_MSG)),
+                created_at=iso(made), deadline_at=iso(made + REQUEST_WINDOW_S), want_s=0))
         return notes
 
     def _board_request_id(self, note_id: str) -> str:
@@ -470,26 +542,41 @@ class BoardLeaseClient:
             return self._requests.get(note_id, note_id)
 
     def delete_request(self, request_id: str) -> None:
-        self._write("cancel", id=self._board_request_id(request_id))
+        self._write("cancel", **{F_ID: self._board_request_id(request_id)})
         with self._mu:
             self._requests.pop(request_id, None)
+            self._requested_at.pop(request_id, None)
 
     def put_answer(self, note: AnswerNote) -> None:
-        """The holder answers a request: ``release`` accepts (the board hands over), ``keep``
-        declines for ``minutes``."""
-        self._write("respond", lease=self.current_token(), id=self._board_request_id(note.id),
-                    accept=note.answer == "release",
-                    minutes=int(note.minutes) if note.answer == "keep" else None)
+        """The holder answers a request: ``accept`` (the board hands over now), or keep for
+        ``minutes`` (5-60, only sent when declining)."""
+        accept = note.answer == "release"
+        minutes = None if accept else max(KEEP_MIN, min(int(note.minutes or KEEP_MIN), KEEP_MAX))
+        self._write("respond", lease=self.current_token(),
+                    **{F_ID: self._board_request_id(note.id), F_ACCEPT: accept, F_MINUTES: minutes})
 
     def get_answer(self, request_id: str) -> AnswerNote | None:
-        """The holder's answer to our request, as the board's queue entry says it; None
-        until there is one."""
-        rid = self._board_request_id(request_id)
-        for w in self._waiters():
-            if _text(w.get("id")) == rid and _text(w.get("answer")) in ("release", "keep"):
-                return AnswerNote(id=request_id, answer=_text(w.get("answer")),
-                                  minutes=_int(w.get("minutes")), message=_text(w.get("answer_msg")),
-                                  at=iso(self._wall() - _int(w.get("answer_age_s"))))
+        """The holder's answer to our request. The queue entry carries none: the answer is read
+        from the board's history (``give`` = released, ``keep <minutes>`` in ``info``), newest
+        event after we asked. None until there is one."""
+        with self._mu:
+            asked = self._requested_at.get(request_id)
+        if asked is None:
+            return None
+        since = self._mono() - asked
+        try:
+            reply = self._read("history", **{F_N: HISTORY_MAX})
+        except HarnessError:
+            return None
+        for e in reversed([e for e in reply.get(R_EVENTS) or [] if isinstance(e, dict)]):
+            kind = _text(e.get(E_EV))
+            age = _int(e.get(E_AGE))
+            if kind not in (EV_GIVE, EV_KEEP) or age > since + 1:
+                continue
+            m = re.search(r"(\d+)", _text(e.get(E_INFO)))
+            return AnswerNote(id=request_id, answer="release" if kind == EV_GIVE else "keep",
+                              minutes=int(m.group(1)) if m and kind == EV_KEEP else 0, message="",
+                              at=iso(self._wall() - age))
         return None
 
     # -- the mode -------------------------------------------------------------------------------
@@ -503,22 +590,22 @@ class BoardLeaseClient:
         return self.who
 
     def set_mode(self, on: bool, *, take: bool = False, confirm_board: str = "") -> ModeResult:
-        """Switch single-user mode. Turning it on may ``take`` the lease in the same step (the
-        reply carries the token); turning it off by someone who is not the lease holder needs
-        the board's name in ``confirm_board``. Owner-only rules are the board's."""
-        reply = self._write("mode", lease=self.current_token(), mode=MODE_SINGLE if on else MODE_OPEN,
-                            take=bool(take and on) or None, confirm_board=confirm_board or None,
-                            who=self._holder() if take and on else None,
-                            app=APP if take and on else None,
-                            ttl_s=self._ttl_s if take and on else None)
-        token = _text(reply.get("token"))
-        granted = bool(on and take and _TOKEN.fullmatch(token))
+        """Switch single-user mode. The wire has one request key, ``mode``: turning it ON by the
+        owner also grants the owner the lease (the reply carries ``token`` and ``expires_in_s``;
+        ``take`` is therefore implicit and the TTL is the board's default); OFF is the owner's
+        or the holder's (our token rides along). ``confirm_board`` has no wire field. Owner-only
+        rules are the board's (``denied``)."""
+        reply = self._write("mode", lease=self.current_token(), **{F_MODE: MODE_SINGLE if on else MODE_OPEN})
+        token = _text(reply.get(R_TOKEN))
+        granted = bool(on and _TOKEN.fullmatch(token))
         if granted:
+            self._ttl_s = DEFAULT_TTL_S
+            self._principal = ""
             self._set_token(token)
         elif not on:
             self._set_token("")
-        left = _int(reply.get("expires_in_s"), self._ttl_s)
-        mode = self._mode_of({**reply, "mode": _text(reply.get("mode")) or
+        left = _int(reply.get(R_EXPIRES), self._ttl_s)
+        mode = self._mode_of({**reply, R_MODE: _text(reply.get(R_MODE)) or
                               (MODE_SINGLE if on else MODE_OPEN)})
         return ModeResult(mode, granted, token if granted else "",
                           iso(self._wall() + left) if granted else "")
@@ -532,10 +619,11 @@ def taken_from_history(events: Any, holder: str) -> dict[str, str] | None:
     evs = [e for e in events if isinstance(e, dict)]
     for e in reversed(evs):
         kind = e.get("event")
-        if kind == "lease.broken_local":
+        if kind in ("lease.broken_local",):
             return {"by": TOUCH_BY, "reason": TOUCH_REASON, "at": _text(e.get("ts"))}
         if e.get("holder") == holder and kind in ("lease.acquired", "lease.promoted",
-                                                  "lease.expired", "lease.released"):
+                                                  "lease.expired", "lease.released",
+                                                  "lease.given"):
             break
         if kind == "lease.admin_revoked" and e.get("prior_holder") == holder:
             break

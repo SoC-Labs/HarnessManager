@@ -466,13 +466,17 @@ Preamble = Callable[[ShellClient, _TapTransport], None]
 # control address (``gate_key``), so a shell on a claim forward (same gate key) carries it too.
 
 #: Board lease refusal codes (pyverify ``board_lease.CODES``): the ones a gated verb meets.
-LEASE_REFUSAL_CODES = ("leased", "lease_required", "bad_token")
+LEASE_REFUSAL_CODES = ("leased", "lease_required", "bad_token", "busy_access")
 #: Verbs the board's gate holds to the lease (pyverify FakeShell / SEC table; the same list the
 #: claim lock refuses). ``display`` (not a query), ``touch_cal`` set/default and ``usd`` actions
 #: are gated too (``lease_gated``).
+#: The key is ignored on the READ rows of a verb (net-protocol v0.21), so a verb with both reads and
+#: writes is listed whole: slot, identity_set, sensors, mcc, usd (by action), panel (by page).
 LEASE_GATED_VERBS = ("swap", "reset", "set_clk", "link", "macgen", "dutrx", "reboot", "commit",
-                     "cosim", "hostio", "mccif")
+                     "cosim", "hostio", "mccif", "slot", "identity_set", "sensors", "mcc")
 LEASE_REASON = "LEASE"
+#: The top-level key that carries the token (``board_lease.TOKEN_KEY``; not imported: cycle).
+LEASE_TOKEN_KEY = "lease"
 
 #: ``gate_key`` -> a callable giving the lease token this process holds for that board (or "").
 _lease_tokens: dict[str, Callable[[], str]] = {}
@@ -508,6 +512,8 @@ def lease_gated(op: dict[str, Any]) -> bool:
         return op.get("act") in ("set", "default")
     if verb == "usd":
         return bool(op.get("action"))
+    if verb == "panel":
+        return "page" in op
     return False
 
 
@@ -517,10 +523,12 @@ def lease_refusal(reply: dict[str, Any]) -> HeldError | None:
     if reply.get("ok") is not False or str(reply.get("code") or "") not in LEASE_REFUSAL_CODES:
         return None
     code = str(reply["code"])
+    hint = ("someone is using the board's touchscreen access page now; try again in a minute"
+            if code == "busy_access" else
+            "take the board lease first (Take lease), or ask whoever holds it")
     err = HeldError(str(reply.get("err") or "the board is in single-user mode: this needs the "
                                             "board lease"),
-                    holder=str(reply.get("holder") or ""),
-                    hint="take the board lease first (Take lease), or ask whoever holds it")
+                    holder=str(reply.get("holder") or ""), hint=hint)
     err.data = {"reason": LEASE_REASON, "code": code,    # type: ignore[attr-defined]
                 "err": str(reply.get("err") or "")}
     return err
@@ -534,10 +542,12 @@ def board_lease_preamble(token: str) -> Preamble:
         asked: list[bool] = [False]                  # was the last request one the lease covers?
 
         def send_op(op: dict[str, Any]) -> Any:
+            # the token rides every request but hello (the board ignores it on READ rows and in
+            # open mode); the `lease` verb's acts add it themselves
             covered = isinstance(op, dict) and op.get("op") != "lease"
             asked[0] = covered
-            if covered and token and lease_gated(op) and "lease" not in op:
-                op = {**op, "lease": token}
+            if covered and token and op.get("op") != "hello" and LEASE_TOKEN_KEY not in op:
+                op = {**op, LEASE_TOKEN_KEY: token}
             return send(op)
 
         def recv_resp() -> dict[str, Any]:
