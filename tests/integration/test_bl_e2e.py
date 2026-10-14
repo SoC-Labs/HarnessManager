@@ -346,3 +346,44 @@ def test_cli_lease_mode_on_then_lease_show_on_a_desk_board(lab, capsys, monkeypa
     assert kept and token in kept[0].read_text(encoding="utf-8")
     rc, out, err = cli(capsys, "lease", "release", target)
     assert rc == 0 and srv.holder is None, (out, err)
+
+
+# --- the CLI on a CLAIMED board (HM-FIX1) ---------------------------------------------------------
+
+
+def _claimed_cli(world, capsys, monkeypatch, *argv):
+    from harness_manager.cli import cmd_hub
+
+    monkeypatch.setattr(cmd_hub, "_stdin_is_tty", lambda: False)
+    real = Engine.candidate_for                          # as a boards.toml row for the hub path
+    monkeypatch.setattr(Engine, "candidate_for", lambda self, target, pack="mps3", via="":
+                        real(self, target, pack, via=via or f"ssh:{HUB}"))
+    return cli(capsys, *argv)
+
+
+def test_cli_lease_mode_on_a_board_we_claimed_rides_the_claim_forward(world, capsys, monkeypatch):
+    hm = world.hm()                                        # the claim is pinned to this state
+    hm.stop()
+    with hm.env():
+        rc, out, err = _claimed_cli(world, capsys, monkeypatch, "lease", "mode", TARGET,
+                                    "on", "--yes")
+    assert rc == 0 and "you hold the lease" in out, (out, err)
+    assert world.srv.mode == "single_user" and world.srv.holder is not None
+    # the write reached the board through the claim forward, not from this PC
+    assert world.rig.ssh.board_launches()                  # the claim forward was launched
+    assert not [g for g in world.rig.fake.gated if g[0] == "lease"]   # the gate refused nothing
+
+
+def test_cli_lease_mode_on_a_board_claimed_by_another_is_refused_in_the_claims_words(
+        world, capsys, monkeypatch):
+    world.rig.fake.claim_gate_all = True
+    hm = world.hm(pin=False)                               # no key of ours the board trusts
+    hm.stop()
+    with hm.env():
+        observed_claimed(world.rig.board_id, board_key_fp(), claimed=True)   # known claimed
+        sent_before = len(world.rig.mutations("lease"))
+        rc, out, err = _claimed_cli(world, capsys, monkeypatch, "lease", "mode", TARGET,
+                                    "on", "--yes")
+    assert rc != 0 and world.srv.mode != "single_user" and world.srv.holder is None, (out, err)
+    assert len(world.rig.mutations("lease")) == sent_before     # nothing was sent
+    assert not world.rig.fake.gated and "claim" in err.lower(), err
