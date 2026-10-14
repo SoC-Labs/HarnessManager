@@ -1012,9 +1012,10 @@ evidence to `$EV/su_*.txt` as in section 0.1.
     Expect: the mode is still **One person at a time**; PC-1 reclaims the lease within 5
     minutes without being asked; PC-2 cannot take it in that time.
 11. **Claimed-board refusals for a keyless peer.** From a PC or a shell whose key is NOT on the
-    board, send a changing verb straight to the control port, for example `printf
-    'reset\n' | nc $B 6900`. Expect: the line `… locked: board claimed (use ssh)`, code
-    `locked`, and no change. Read verbs (`info`) still answer. Then, from PC-1, the same
+    board, send a changing verb straight to the control port as one JSON line, for example
+    `printf '{"op":"reset","target":"dut"}\n' | nc -w 3 $B 6900`. Expect:
+    `{"ok":false,"err":"reset locked: board claimed (use ssh)","code":"locked"}` and no change.
+    Read verbs still answer: `printf '{"op":"ping"}\n' | nc -w 3 $B 6900`. Then, from PC-1, the same
     change works without you doing anything extra: HM sends it through the claim connection.
 12. **Switch off and tidy.** PC-1: Switch to shared. Expect: "`<board>` is shared again." on
     both PCs. Set `lease.board_ttl_min` back if you changed it.
