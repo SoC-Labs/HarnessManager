@@ -74,6 +74,7 @@ from harness_manager.core.errors import (
     HarnessError,
     RefusedError,
     UnavailableError,
+    UnreachableError,
     UsageError,
 )
 from harness_manager.services import lease_backend
@@ -983,6 +984,20 @@ def cmd_lease(ctx: Ctx) -> int:
     a = ctx.args
     if a.lease_cmd == "mode":
         cand, server = _lease_server(ctx)
+        if a.state is not None and (server is None or getattr(server, "closed", False)):
+            # A switch is a write: open the board through the engine so it rides the session's
+            # claim route (a board this HM claimed, or the claim's plain words). A board that
+            # will not open keeps the closed-board adapter (direct; the lock is the answer).
+            try:
+                with ctx.board("lease mode") as (cand, session):
+                    live = lease_backend.lease_of(session)
+                    if live is None and callable(getattr(session, "identity", None)):
+                        session.identity()             # the first read teaches it board_lease
+                        live = lease_backend.lease_of(session)
+                    if live is not None:
+                        return _lease_mode(ctx, cand, live)
+            except UnreachableError:
+                pass
         return _lease_mode(ctx, cand, server)
     cand, hub = _hub(ctx)
     svc = _service()

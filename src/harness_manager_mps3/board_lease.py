@@ -549,6 +549,7 @@ class Mps3BoardLease:
     """``session.lease`` for a desk board that is its own lease server (``LeaseServer``)."""
 
     kind = lease_backend.KIND_BOARD
+    closed = False                # True: made without a session (adapter_for_candidate)
 
     def __init__(self, session: Any, client: BoardLeaseClient | None = None) -> None:
         from .panel import board_address
@@ -596,7 +597,9 @@ def adapter_for_candidate(candidate: Any, features: tuple[str, ...]) -> Mps3Boar
     bare.candidate = candidate    # type: ignore[attr-defined]
     bare.shell = Mps3Shell(host, port, gate_key=ctlgate.key_of_address(link.address, CONTROL_PORT))  # type: ignore[attr-defined]
     bare.claim = None             # type: ignore[attr-defined]
-    return Mps3BoardLease(bare)
+    lease = Mps3BoardLease(bare)
+    lease.closed = True           # no session behind it: a write should open the board first
+    return lease
 
 
 def upgrade_session(session: Any, features: tuple[str, ...]) -> None:
