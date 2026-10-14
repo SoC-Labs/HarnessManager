@@ -86,6 +86,33 @@ def pin_claim(session: Any, key_line: str = BOARD_KEY) -> str:
     return fp
 
 
+#: The 6900 verbs board image v2.2 adds to the claim lock (display and touch_cal: some acts).
+V22_LOCKED_VERBS = ("swap", "reset", "set_clk", "link", "macgen", "dutrx", "reboot")
+PUSH_LOCKED_LINE = (b'{"ok":false,"err":"push locked: board claimed (use ssh)",'
+                    b'"code":"locked"}\n')
+
+
+def _gated_raw_push(handler: Any) -> Any:
+    """6910 with the v2.2 lock: a non-local peer on a claimed ``claim_gate_all`` board gets ONE
+    line and the close (``mps3_net_refuse_with_line``), whatever kind it pushes."""
+    if getattr(handler, "_v22_gated", False):
+        return handler
+
+    class Gated(handler):                                 # type: ignore[misc, valid-type]
+        _v22_gated = True
+
+        def handle(self) -> None:
+            shell = self.server.shell
+            peer = self.client_address[0]
+            if shell.claim_gate_all and shell.ssh_claimed and not shell._store_local(peer):
+                shell.gated.append(("push", str(peer)))
+                refuse_with_line(self.request, PUSH_LOCKED_LINE)
+                return
+            super().handle()
+
+    return Gated
+
+
 class StoreLock:
     """Mixin for a pyverify ``FakeShell``: the D13 store's claim lock (S6) as harnessd has
     it, with the slot lock's idea of "the board itself" (``slots.peer_local``: its
@@ -97,8 +124,52 @@ class StoreLock:
             return bool(slots.peer_local(peer))
         return bool(peer) and str(peer).startswith("127.")
 
+    #: Board image v2.2 (CLAIMROUTE): ``True`` also locks the state-changing verbs below, the
+    #: design pushes on 6910 (kinds 0/1/2) and TFTP, for a non-local peer on a claimed board.
+    #: Opt in per fake (``fake.claim_gate_all = True``); off, only the store/slot locks.
+    claim_gate_all = False
+
+    #: every verb the v2.2 lock refused: (op, peer)
+    gated: list[tuple[str, str]]
+
+    def _gate_all_refuses(self, request: dict[str, Any], peer: str | None) -> str:
+        """The verb name to refuse, else "": v2.2's list. Reads (ping, version, stats, diag, log,
+        telemetry, identity, locate, hello, panel, display query, slot/usd status) stay open."""
+        op = str(request.get("op"))
+        if op in V22_LOCKED_VERBS:
+            return op
+        if op == "display" and request.get("owner") != "query" and request.get("act") != "query":
+            return op
+        if op == "touch_cal" and request.get("act") in ("set", "default"):
+            return op
+        return ""
+
+    def start(self) -> Any:
+        super().start()                                   # type: ignore[misc]
+        if not hasattr(self, "gated"):
+            self.gated = []
+        servers = getattr(self, "_servers", [])
+        if len(servers) > 1:                              # [control, raw, ...]: gate 6910
+            servers[1].RequestHandlerClass = _gated_raw_push(servers[1].RequestHandlerClass)
+        return self
+
+    def _tftp_receive(self, client: Any, wrq_packet: bytes) -> None:
+        if isinstance(self, FakeShell) and self.claim_gate_all and self.ssh_claimed \
+                and not self._store_local(client[0]):
+            self.gated.append(("tftp", str(client[0])))
+            self._tftp_send_error_from(None, client, 2, "access violation: board claimed (use ssh)")
+            return
+        super()._tftp_receive(client, wrq_packet)         # type: ignore[misc]
+
     def handle_control(self, request: dict[str, Any], peer: str | None = None) -> dict[str, Any]:
         op = request.get("op")
+        if isinstance(self, FakeShell) and self.claim_gate_all and self.ssh_claimed \
+                and not self._store_local(peer):
+            verb = self._gate_all_refuses(request, peer)
+            if verb:
+                self.gated.append((verb, str(peer)))
+                return {"ok": False, "err": f"{verb} locked: board claimed (use ssh)",
+                        "code": "locked"}
         if isinstance(self, FakeShell) and self.ssh_claimed and not self._store_local(peer):
             if op == "usd" and request.get("action"):
                 return {"ok": False, "err": "usd locked: board claimed (use ssh)",
