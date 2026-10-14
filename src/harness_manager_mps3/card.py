@@ -381,6 +381,8 @@ def _usd_error(what: str, err: str) -> HarnessError:
                                  hint="only the running pair can be committed")
     if e == "store busy":
         return HeldError(f"{what}: the card store is busy", hint="try again in a moment")
+    if slot_words.is_claim_lost(e):
+        return slot_words.lost_claim_error(e, what)
     if slot_words.is_claim_lock(e):
         # S6: `usd locked: board claimed (use ssh)` / `commit locked: ...` (the claim lock)
         from harness_manager.services.claim import LOCK_HINT

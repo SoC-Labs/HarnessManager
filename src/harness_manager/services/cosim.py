@@ -77,6 +77,10 @@ def refusal(reply: Mapping[str, Any], act: str = "") -> HarnessError:
     if code == "no_hw":
         return _unavailable(NO_HW)
     if code == "locked":
+        from harness_manager_mps3.slot_words import is_claim_lost, lost_claim_error
+
+        if is_claim_lost(err, code):
+            return lost_claim_error(err)
         return ClaimLockedError(LOCKED, hint=NEEDS_CLAIM_HINT)
     if code == "invalid":
         return UsageError(f"The board refused that: {err or 'invalid'}",
@@ -159,7 +163,11 @@ def _route(session: Any, claimed: bool | None = None) -> str:
 
 
 def _is_locked(reply: Mapping[str, Any]) -> bool:
-    return str(reply.get("code") or "") == "locked" or "board claimed" in str(reply.get("err") or "")
+    """The claim lock by ``code`` (text only for an image before the codes). A lost claim
+    (card-less board, warm restart) is not retried through the tunnel: ``refusal`` says so."""
+    from harness_manager_mps3.slot_words import is_claim_lock
+
+    return is_claim_lock(str(reply.get("err") or ""), str(reply.get("code") or ""))
 
 
 def _do(session: Any, act: str, n: int | None = None) -> dict[str, Any]:

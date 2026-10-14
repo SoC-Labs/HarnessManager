@@ -11,14 +11,14 @@ Do not edit anything here by hand. Rebuild it with `scripts/vendor_pyverify.sh` 
 | Field | Value |
 |---|---|
 | Wheel | `mps3_pyverify-0.1.0-py3-none-any.whl` |
-| sha256 | `b91615edbbc18d85af0aee0dcde1e09c9f576f6e12b1fa7854f839352a8879a4` |
+| sha256 | `cbbcc3e15e63ef249feb03f705abd79f0b82f1138271d019ef05766a846d9a76` |
 | Built from | `git@github.com:SoC-Labs/MPS3-NanoSoC-Verification-Platform-Dev.git` |
-| Platform commit | `0554433de2519e8b10963f4454707d19f89d65d9` (2026-10-13T10:07:20+01:00) |
-| Status | DEV ONLY: re-vendor from a tagged platform commit before 1.2.0 |
-| Commit subject | net-protocol v0.20: usd status slot_mb + store_ver (contract, pyverify UsdResponse, FakeShell linux_mint4, tests) |
-| Last pyverify change at or before it | `0554433de2519e8b10963f4454707d19f89d65d9` |
+| Platform commit | `16a9aad600ab0b7951ac9ea844f3087ec750d239` (2026-10-14T10:49:48+01:00) |
+| Status | DEV ONLY: rc2 SEC 16a9aad6; re-vendor from the Release 3 tag |
+| Commit subject | SEC: claim enforcement on every mutation (v2.2.0-rc2) -- one table, one predicate |
+| Last pyverify change at or before it | `16a9aad600ab0b7951ac9ea844f3087ec750d239` |
 | Source | `git archive <commit> host/pyverify` (committed files only) |
-| Built with | `pip wheel --no-deps`, pip 26.2.1, Python 3.11.13, SOURCE_DATE_EPOCH=1791882440 |
+| Built with | `pip wheel --no-deps`, pip 26.2.1, Python 3.11.13, SOURCE_DATE_EPOCH=1791971388 |
 
 Check it: `sha256sum vendor/mps3_pyverify-0.1.0-py3-none-any.whl` must print the sha256 above.
 `tests/unit/test_l5_release.py` checks this in `make check`.

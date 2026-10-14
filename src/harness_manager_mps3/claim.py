@@ -158,9 +158,9 @@ STATE_MINE = "mine"
 STATE_OTHER = "other"
 STATE_UNCLAIMED = "unclaimed"
 STATE_UNKNOWN = "unknown"
-LOST_CLAIM_WORDS = ("The board lost its claim when it restarted (it has no card to keep it). "
-                    "Claim it again from this PC.")
-LOST_CLAIM_HINT = "`harness-manager board claim TARGET`, or Claim on the Access page"
+# The lost-claim words live in slot_words (the error classifier needs them too).
+LOST_CLAIM_WORDS = _slot_words.LOST_CLAIM_WORDS
+LOST_CLAIM_HINT = _slot_words.LOST_CLAIM_HINT
 
 #: How long a LAN identify answer is reused (``info`` asks on every read).
 LAN_TTL_S = 30.0
@@ -758,6 +758,10 @@ class Observation:
     #: the harness's uptime in seconds (``up_ms``; None = not published)
     boot_id: str = ""
     up_s: float | None = None
+    #: identify's ``ssh.claim_pending`` when an image publishes it (additive; a card-less board
+    #: after a warm restart: the claim is lost until the serial console renews it). False when
+    #: absent: `identify` ``ssh.claimed`` stays the real claim.
+    claim_pending: bool = False
 
 
 def _iso(t: float) -> str:
@@ -881,6 +885,7 @@ class Mps3Claim:
         self._fwd: Any = None
         self._fwd_users: dict[str, int] = {}
         self._closed = False
+        self._lost_seen = False       # a reply said "claim lost on reboot" (note_claim_lost)
         self._pin_mu = threading.Lock()
         #: why the last netboot auto-accept was not taken (only said while the setting is on)
         self._netboot_why = ""
@@ -1078,7 +1083,8 @@ class Mps3Claim:
         up = raw.get("up_ms")
         up_s = float(up) / 1000.0 if isinstance(up, (int, float)) and not isinstance(up, bool) \
             else None
-        return Observation(claimed, key, source, at, err, first, boot, up_s)
+        pending = ssh.get("claim_pending") is True
+        return Observation(claimed, key, source, at, err, first, boot, up_s, pending)
 
     def _remember(self, obs: Observation) -> None:
         if obs.claimed is None:
@@ -1156,7 +1162,9 @@ class Mps3Claim:
         # state stays "unclaimed" (the other screens read it); ``lost`` is the extra word.
         # Never claimed again from here by itself: re-claiming is the person's decision.
         lost = None
-        if obs.claimed is False and mine_on_record and rec.get("key_fp"):
+        seen_lost = self._lost_seen and obs.claimed is not True
+        if (obs.claimed is False and mine_on_record and rec.get("key_fp")) \
+                or obs.claim_pending or seen_lost:
             lost = {"message": LOST_CLAIM_WORDS, "hint": LOST_CLAIM_HINT}
             notes.append(LOST_CLAIM_WORDS)
         if obs.claimed is not None and obs.error:
@@ -1902,6 +1910,11 @@ class Mps3Claim:
                                    f"{why}; nothing was changed", hint=LOCKED_HINT)
         return route
 
+    def note_claim_lost(self) -> None:
+        """A board reply said the claim was lost on a reboot: ``compose`` shows the lost-claim
+        state until identify says the board is claimed again."""
+        self._lost_seen = True
+
     def hold_forward(self, user: str) -> Any:
         """The session's ONE board-SSH forward (``LOCKED_FORWARDS`` through ``open_forward``:
         the pinned host key, the claimed key, ``-J`` the hub), opened by its first user and
@@ -1972,6 +1985,8 @@ def refusal_error(err: str, what: str = "this operation", *,
     """
     text = (err or "").strip()
     low = text.lower()
+    if _slot_words.is_claim_lost(text):
+        return _slot_words.lost_claim_error(text)    # not "claimed by X": the claim is gone
     if low.startswith("slot locked") or "board claimed" in low:
         state = (status or {}).get("state")
         claimed = (status or {}).get("claimed") or {}

@@ -871,8 +871,11 @@ def card_outcome(persist: PersistResult | None) -> CardOutcome:
     if persist.status == PERSIST_COMMITTED:
         return CardOutcome(kept=True, slot=persist.slot)
     if persist.status == PERSIST_FAILED:
-        from .slot_words import is_claim_lock
+        from .slot_words import LOST_CLAIM_WORDS, is_claim_lock, is_claim_lost
 
+        if is_claim_lost(str(persist.err or "")):
+            return CardOutcome(kept=False, why=f"{LOST_CLAIM_WORDS} The card keeps the design "
+                                               "it had.")
         if is_claim_lock(str(persist.err or "")):
             # S6: the board is claimed and this deploy did not come from the board itself
             return CardOutcome(kept=False, why=(

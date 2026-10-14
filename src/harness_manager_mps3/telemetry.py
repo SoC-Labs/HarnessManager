@@ -291,7 +291,7 @@ def sensors_error(reply: dict[str, Any], what: str) -> HarnessError:
     code = str(reply.get("code") or "")
     err = str(reply.get("err") or "")
     words = SENSORS_CODE_WORDS.get(code)
-    if code == "locked" or "board claimed" in err:
+    if code == "locked" or (not code and "board claimed" in err):
         from harness_manager.services.claim import lock_error
 
         return lock_error(err, what)

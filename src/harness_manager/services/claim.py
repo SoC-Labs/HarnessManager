@@ -77,6 +77,10 @@ def lock_refusal(data: bytes | str | None) -> str:
 
 def lock_error(err: str, what: str, *, hint: str = "") -> ClaimLockedError:
     """``what`` refused by the claim lock (``err``: the harness's words)."""
+    from harness_manager_mps3 import slot_words
+
+    if slot_words.is_claim_lost(err):
+        return slot_words.lost_claim_error(err, what)
     return ClaimLockedError(
         f"{what} was refused: the board is claimed, and this connection did not come from "
         f"the board itself [harness: {err or 'locked'}]", hint=hint or LOCK_HINT)

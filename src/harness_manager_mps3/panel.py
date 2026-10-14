@@ -92,6 +92,7 @@ from harness_manager.core.panel import (
     touch_health,
 )
 
+from . import slot_words
 from .capabilities import NEEDS_LOCATE, NEEDS_PANEL, NEEDS_PRESENCE
 from .shell import _ShellBusy
 
@@ -153,6 +154,8 @@ def _declined(reply: dict[str, Any], capability: str, what: str) -> HarnessError
                           hint="Harness Manager sent something this release does not "
                                "accept; nothing changed on the board")
     if code == "locked":
+        if slot_words.is_claim_lost(err, code):
+            return slot_words.lost_claim_error(err)
         return ClaimLockedError(f"the harness refused {what}: {err}",
                                 hint="the board's SSH is claimed: reach it over SSH")
     return RefusedError(f"the harness refused {what}: {err}" + (f" ({code})" if code else ""))

@@ -54,6 +54,7 @@ class LockedReply(ClaimLockedError):
         self.err = err
         self.code = code
         self.from_reply = True
+        self.claim_lost = slot_words.is_claim_lost(err, code)
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,13 @@ def locked_error(err: str, what: str, session: Any = None) -> HarnessError:
     decision made before sending."""
     claim = getattr(session, "claim", None)
     exc: HarnessError | None = None
+    if slot_words.is_claim_lost(err):
+        # the claim is gone (card-less board, warm restart): never the tunnel's to fix
+        if claim is not None and callable(getattr(claim, "note_claim_lost", None)):
+            claim.note_claim_lost()
+        exc = slot_words.lost_claim_error(err, what)
+        exc.from_reply = False                     # type: ignore[attr-defined]  # final: no retry
+        return exc
     if claim is not None and callable(getattr(claim, "refusal_error", None)):
         exc = claim.refusal_error(err, what)
     else:
@@ -125,7 +133,8 @@ def locked_call(shell: Any, fn: Callable[[Any], T]) -> T:
 
 
 def _check(ok: Any, err: Any, code: str) -> None:
-    if ok is False and isinstance(err, str) and is_locked(err, code):
+    if ok is False and isinstance(err, str) and (is_locked(err, code)
+                                                 or slot_words.is_claim_lost(err, code)):
         raise LockedReply(err, code)
 
 
@@ -156,6 +165,8 @@ def routed_shell(session: Any, what: str, direct: Any, *, impl: str | None = Non
 def escalate(session: Any, what: str, err: str, *, impl: str | None = None) -> None:
     """A direct call was answered with the lock: return when this Harness Manager holds the
     claim (go through the forward), else raise the refusal (``ClaimLockedError``)."""
+    if slot_words.is_claim_lost(err):                      # the claim is gone: no tunnel helps
+        raise locked_error(err, what, session)
     route_of(session, what, impl, claimed=True)            # not ours: ClaimLockedError, the hint
     claim = getattr(session, "claim", None)
     if claim is None or not callable(getattr(claim, "hold_forward", None)):
@@ -179,7 +190,7 @@ def routed_op(session: Any, what: str, direct: Any, op: Callable[[Any], T], *,
             via_board = r.via_board
             return op(r.shell)
     except LockedReply as exc:
-        if via_board:                                   # locked even from the board itself
+        if via_board or exc.claim_lost:      # locked even from the board itself / claim gone
             raise locked_error(exc.err, what, session) from exc
         err = exc.err
     escalate(session, what, err, impl=impl)
