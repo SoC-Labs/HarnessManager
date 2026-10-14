@@ -199,7 +199,7 @@ _BY_SUFFIX = re.compile(r"\(by ([^()]+)\)\s*$")
 #: fpgahub events that end a lease by force; ``lease.revoked`` names ``holder``, the
 #: ``admin_revoked`` audit event ``prior_holder`` (T8: both arrive over the REST event stream).
 #: A board's history entries for a lease ended at the board itself (touchscreen).
-BOARD_BREAK_EVENTS = ("taken", "lease_break", "broken", "mode_off")
+BOARD_BREAK_EVENTS = ("taken", "lease_break", "broken", "mode_off", "break", "broken_local")
 AT_THE_BOARD = "someone at the board"
 REVOKE_EVENTS = ("lease.revoked", "lease.admin_revoked")
 _NOTE_ID = re.compile(r"[A-Za-z0-9_.\-]{1,64}")

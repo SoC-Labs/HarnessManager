@@ -253,7 +253,7 @@ def test_another_hm_is_refused_with_the_boards_words(world):
     with pytest.raises(HeldError) as exc, two.env():
         two.eng.session(two.bid).resets.reset("dut")
     assert exc.value.data["reason"] == "LEASE" and exc.value.data["code"] == "leased"
-    assert "has the board" in exc.value.message           # the board's own words
+    assert "leased: held by" in exc.value.message         # the board's own words
     assert world.carried("reset") == [None]
 
 
