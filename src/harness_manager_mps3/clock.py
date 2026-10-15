@@ -16,8 +16,10 @@ from the clk_wiz_dut register file (``clk_linux.c``). So on a Linux board ``set_
 bare-metal preset path (claim-routed), ``clocks()`` reports ``stats.dut_mhz`` (source "board
 stats (clk_wiz_dut read-back)"), and only when the stats cannot be read does it fall back to the
 pin model's 50 MHz start-up rate and say so. The Linux reply may lack ``locked`` (the client then
-reads False), so it is not trusted there: the read-back decides. The clock goes back to 50 MHz
-when the harness restarts after a fabric reset.
+reads False), so it is not trusted there: the read-back decides. A device configuration (power-on,
+MCC reboot) brings the clock back to 50 MHz; a harness restart or a Linux-only reboot keeps the
+rate set (clk_linux.c). After a watchdog/POR fabric reset the boot re-sync reloads 50 MHz, which
+is not yet proven on silicon, so the words promise only the first.
 
 FIX-PACK-9 (CLI): ``harness-manager clock <ip>`` opens a candidate the CLI made from the
 address, with no identity, so a Linux board read as bare metal. The adapter asks the session for
@@ -41,7 +43,7 @@ from . import claim_route
 
 PRESET_MHZ = {25.0: "25mhz", 50.0: "50mhz", 100.0: "100mhz"}
 #: The reason on a Linux board's reading (the CLI's line: "dut  100 MHz  [board stats (…)]  (…)").
-LINUX_WHY = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the harness restarts"
+LINUX_WHY = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the board is powered on or the MCC reboots it"
 #: The reading's source when the board answered (``stats.dut_mhz``).
 STATS_SOURCE = "board stats (clk_wiz_dut read-back)"
 PIN_MODEL = "pin-model"

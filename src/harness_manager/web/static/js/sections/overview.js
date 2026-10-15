@@ -514,7 +514,7 @@ function Readings({ bid }) {
   }
   // 3. DUT clock. HM 1.2 (LINUX-CLOCK): the Linux harness answers set_clk and reports dut_mhz, so
   // a Linux board's clock is a plain reading with the adapter's reason ("set with presets 25, 50
-  // or 100 MHz; goes back to 50 MHz when the harness restarts") and its source; a Linux board with
+  // or 100 MHz; goes back to 50 MHz when the board is powered on or the MCC reboots it") and its source; a Linux board with
   // no rate known shows no tile (the row reflows); a bare-metal one, whose shell sets but cannot
   // read it back, says "not reported" in grey.
   const hw = harnessWords(b);

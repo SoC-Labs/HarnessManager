@@ -17,7 +17,7 @@ from harness_manager.core.errors import (
 from harness_manager_mps3 import clock as clock_mod
 from harness_manager_mps3.clock import LINUX_WHY, STATS_SOURCE, Mps3Clocks
 
-WHY_TEXT = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the harness restarts"
+WHY_TEXT = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the board is powered on or the MCC reboots it"
 
 
 class Board:

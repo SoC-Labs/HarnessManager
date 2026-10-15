@@ -3,7 +3,7 @@
 5. On a Linux board the DUT clock tile said "unavailable · the shell cannot read the DUT clock" in
    the warning tint. LINUX-CLOCK (HM 1.2): the Linux harness answers set_clk and stats.dut_mhz, so the
    MPS3 pack reports the board's own reading with the reason "set with presets 25, 50 or 100 MHz; goes
-   back to 50 MHz when the harness restarts" (harness_manager_mps3/clock.py), and the tile shows
+   back to 50 MHz when the board is powered on or the MCC reboots it" (harness_manager_mps3/clock.py), and the tile shows
    "50 MHz" with that reason and the source, plain. With no rate known the tile is left out and the
    row reflows.
 6. No "?" in the readings: a counter the harness does not send is "not reported" with a short reason
@@ -33,7 +33,7 @@ expect = sync_api.expect
 pytestmark = pytest.mark.browser
 T = 15_000
 APP = {"width": 1440, "height": 900}
-LINUX_REASON = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the harness restarts"
+LINUX_REASON = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the board is powered on or the MCC reboots it"
 FIXED = {"name": "dut", "value": 50.0, "unit": "MHz", "source": "board stats (clk_wiz_dut read-back)",
          "reason": LINUX_REASON, "available": True}
 NO_RATE = {"name": "dut", "value": None, "unit": "MHz", "source": "the pin model", "available": False,
@@ -117,7 +117,7 @@ def test_a_linux_boards_dut_clock_is_the_boards_reading_plain_not_a_warning(show
     tile = by_id(page, "ov-kpi-clock")
     expect(tile).to_contain_text("50", timeout=T)
     expect(tile).to_contain_text("MHz")
-    expect(tile).to_contain_text("goes back to 50 MHz when the harness restarts")
+    expect(tile).to_contain_text("goes back to 50 MHz when the board is powered on or the MCC reboots it")
     expect(tile).to_contain_text("board stats (clk_wiz_dut read-back)")
     assert "fixed by the shell" not in tile.inner_text()
     expect(tile).to_have_attribute("data-level", "plain")

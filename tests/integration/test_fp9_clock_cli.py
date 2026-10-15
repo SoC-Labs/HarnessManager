@@ -20,7 +20,7 @@ from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.virtual_board import VirtualMps3, ila_v011_profile, linux_harnessd_profile
 
 RC2 = 0x44EE76D5
-WHY = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the harness restarts"
+WHY = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the board is powered on or the MCC reboots it"
 SRC = "board stats (clk_wiz_dut read-back)"
 
 
