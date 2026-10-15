@@ -1447,6 +1447,11 @@ verdict for this board:
 asks. **Pin** keeps the board on a release (nothing newer is offered). **History** shows
 the last installs. **Roll back** reinstalls the release the last install replaced.
 
+**Upgrading from 2.1.0 to 2.2.0:** write the 2.2.0 config SD and REBOOT. The board then
+runs the new fabric under its old Linux image. **Board > Versions > Install** pushes the
+OS image over Ethernet (no Debug USB, and the config SD is not rewritten); the plan says
+"only its OS image is older".
+
 **Running** is the catalogue's release the board runs; when the release reports another
 number (the version verb, what `info` prints), it says "reports 1.0.0" beside it,
 and the header shows both. Behind a hub, installs are for this Harness Manager holding the

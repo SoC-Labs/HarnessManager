@@ -72,6 +72,9 @@ boards behave as before.
 ### Versions
 - **Each OS slot shows its own release.** Slots A and B are matched to a release by content
   (never by a version number alone); an image from another tool reads "unknown release".
+- **Upgrading from 2.1.0 to 2.2.0.** Write the 2.2.0 config SD and REBOOT; the board then runs
+  the new fabric under its old Linux. **Board > Versions > Install** now pushes only the OS
+  image over Ethernet and no longer asks for the Debug USB or rewrites the config SD.
 
 ### Fixes
 - Background errors read in plain words, not as raw exception text or JSON.
