@@ -29,6 +29,7 @@ from harness_manager.core.errors import RefusedError
 from harness_manager.core.model import BoardIdentity
 
 from . import hub_door
+from .os_slots import VERIFIED_BOOT
 from .schema import (
     KIND_OS_SLOT,
     KIND_OVERLAYS,
@@ -43,7 +44,6 @@ from .schema import (
     os_header_crc,
     os_provisioned_static,
 )
-from .os_slots import VERIFIED_BOOT
 from .version import at_least, compare_safe, same_version
 from .version import same_u32 as _same_u32
 

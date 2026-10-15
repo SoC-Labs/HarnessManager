@@ -13,7 +13,25 @@ from harness_manager.core.errors import HeldError
 from harness_manager.services.slots import SlotService
 from harness_manager_mps3 import card as card_mod
 from harness_manager_mps3.deploy import card_outcome
-from tests.integration.test_linux_answers_board import with_card  # noqa: F401 - fixture
+from harness_manager_mps3.identify import IDENTIFY_PORT_ENV
+from tests.fakes.lxanswers_board import answers_board
+from tests.fakes.lxslots_board import LINUX_SID, board_session
+
+
+@pytest.fixture
+def with_card(tmp_path, monkeypatch):
+    """A Linux board with a D13 card running ``synth`` (as test_linux_answers_board)."""
+    from tests.fakes.t2_overlays import SYNTH_RM_ID, make_overlay, use_overlay_dirs
+
+    root = tmp_path / "overlays"
+    make_overlay(root, "synth", rm_id=SYNTH_RM_ID, static_id=LINUX_SID)
+    use_overlay_dirs(monkeypatch, root)
+    fake = answers_board(usd_card="da", boot_rm_id=SYNTH_RM_ID)
+    monkeypatch.setenv(IDENTIFY_PORT_ENV, str(fake.identify_port))
+    session = board_session(fake)
+    yield fake, session
+    session.close()
+    fake.stop()
 
 
 def busy_then(fake, *, clears: bool):
