@@ -2,8 +2,8 @@
 "dut  unavailable: the shell cannot read the DUT clock back; set it to know it". The CLI's
 candidate is only the address (no identity), so the MPS3 clock adapter read the board as bare
 metal. It now asks the session (the shell's ``version``), and the Linux board's DUT clock is
-50 MHz, source ``pin-model``, "fixed by the shell: the Linux harness cannot change it", in
-human, ``--json`` and ``--tsv``. Twin: a bare-metal board is unchanged.
+50 MHz, from the board's stats (LINUX-CLOCK, HM 1.2: the Linux harness answers set_clk and
+reports dut_mhz), in human, ``--json`` and ``--tsv``. Twin: a bare-metal board is unchanged.
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.virtual_board import VirtualMps3, ila_v011_profile, linux_harnessd_profile
 
 RC2 = 0x44EE76D5
-WHY = "fixed by the shell: the Linux harness cannot change it"
+WHY = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the harness restarts"
+SRC = "board stats (clk_wiz_dut read-back)"
 
 
 @pytest.fixture(params=["linux", "bare-metal"])
@@ -42,7 +43,7 @@ def run(capsys, *argv: str) -> tuple[int, str]:
     return rc, capsys.readouterr()[0]
 
 
-def test_clock_on_a_linux_board_says_50_mhz_fixed_by_the_shell(board, capsys):
+def test_clock_on_a_linux_board_says_50_mhz_from_the_board_stats(board, capsys):
     impl, vb = board
     rc, human = run(capsys, "clock", vb.shell_endpoint)
     assert rc == 0, human
@@ -51,10 +52,10 @@ def test_clock_on_a_linux_board_says_50_mhz_fixed_by_the_shell(board, capsys):
     rc, tsv = run(capsys, "--tsv", "clock", vb.shell_endpoint)
     row = tsv.strip().splitlines()[-1].split("\t")
     if impl == "linux":
-        assert human.strip() == f"dut              50 MHz  [pin-model]  ({WHY})"
+        assert human.strip() == f"dut              50 MHz  [{SRC}]  ({WHY})"
         assert (r["value"], r["unit"], r["source"], r["reason"], r["available"]) == (
-            50.0, "MHz", "pin-model", WHY, True)
-        assert row[1:5] == ["dut", "50", "MHz", "pin-model"] and row[-1] == WHY
+            50.0, "MHz", SRC, WHY, True)
+        assert row[1:5] == ["dut", "50", "MHz", SRC] and row[-1] == WHY
         assert "cannot read" not in human + js + tsv
     else:                                                   # the twin: bare metal unchanged
         assert human.strip() == ("dut              unavailable: the shell cannot read the DUT "
@@ -62,11 +63,15 @@ def test_clock_on_a_linux_board_says_50_mhz_fixed_by_the_shell(board, capsys):
         assert r["available"] is False and r["source"] == "shell set_clk"
 
 
-def test_setting_it_on_a_linux_board_is_refused_and_bare_metal_still_sets(board, capsys):
+def test_setting_it_works_on_a_linux_board_and_on_bare_metal(board, capsys):
     impl, vb = board
     rc, out = run(capsys, "--json", "clock", vb.shell_endpoint, "--dut-mhz", "25")
-    if impl == "linux":
-        assert rc != 0 and "fixed by the shell" in json.loads(out)["error"]["message"]
-    else:
-        assert rc == 0, out
+    assert rc == 0, out
+    (r,) = json.loads(out)["readings"]
+    assert r["value"] == 25.0
+    assert r["source"] == (SRC if impl == "linux" else "shell set_clk (last set value)")
+    rc, out = run(capsys, "--json", "clock", vb.shell_endpoint, "--dut-mhz", "33")   # the twin
+    assert rc != 0 and "not a preset" in json.loads(out)["error"]["message"]
+    if impl == "linux":                                     # read back from the board's stats
+        rc, out = run(capsys, "--json", "clock", vb.shell_endpoint)
         assert json.loads(out)["readings"][0]["value"] == 25.0

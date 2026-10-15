@@ -10,6 +10,9 @@ Support for boards that run a mint-4 release (v2.2 and later), and a round of fi
 words from workshop preparation. Features marked "mint-4" appear only on those boards; other
 boards behave as before.
 
+### Linux boards
+- Linux boards: the DUT clock can be set (25/50/100 MHz presets) and is read back from the board.
+
 ### Mint-4 boards
 - **The card's layout is read from the card, not assumed.** The card writer reads the card's
   partition table (layout v1 or v2) before it writes, so a layout-v2 card (32 MiB design

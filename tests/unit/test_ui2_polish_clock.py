@@ -1,5 +1,5 @@
-"""UI2-POLISH item 5: the Linux harness's DUT clock is FIXED by the shell, so the MPS3 clock
-adapter reports the pin model's dut_clk rate ("fixed by the shell"), never "cannot read it back";
+"""UI2-POLISH item 5 (reworked by LINUX-CLOCK, HM 1.2): a Linux board never says "cannot read it
+back": it reports the board's stats, else the pin model's dut_clk rate and why;
 the bare-metal shell keeps its set-it-to-know-it answer. Each with its twin."""
 
 from __future__ import annotations
@@ -8,8 +8,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from harness_manager.core.errors import UnavailableError
-from harness_manager_mps3.clock import FIXED, FIXED_WHY, Mps3Clocks, fixed_dut_mhz
+from harness_manager_mps3.clock import LINUX_WHY, Mps3Clocks, fixed_dut_mhz
 
 
 def session(impl: str, shell_id: str) -> NS:
@@ -26,18 +25,17 @@ def test_twin_a_shell_the_model_lacks_has_no_rate(sid):
     assert fixed_dut_mhz(sid) is None
 
 
-def test_a_linux_board_reports_its_fixed_rate_and_refuses_a_set():
+def test_a_linux_board_whose_stats_are_unreadable_reports_the_pin_model_rate_and_says_so():
+    # LINUX-CLOCK: the stats read-back is the first source (tests/unit/test_linux_clock.py); here the
+    # test shell has no stats, so the pin model's 50 MHz is shown with the reason that says so.
     (r,) = Mps3Clocks(session("linux", "0x44ee76d5")).clocks()
-    # FIX-PACK-9: the whole fact, from the pin model (the tile still shows "fixed by the shell")
-    assert (r.name, r.value, r.unit, r.reason) == ("dut", 50.0, "MHz", FIXED_WHY)
-    assert r.reason.startswith(FIXED) and r.source == "pin-model"
-    with pytest.raises(UnavailableError, match="fixed by the shell"):
-        Mps3Clocks(session("linux", "0x44ee76d5")).set_clock("dut", 25.0)
+    assert (r.name, r.value, r.unit, r.source) == ("dut", 50.0, "MHz", "pin-model")
+    assert "stats could not be read" in r.reason and r.reason.endswith(LINUX_WHY)
 
 
 def test_twin_a_linux_board_on_an_unknown_shell_says_why_not_cannot_read():
     (r,) = Mps3Clocks(session("linux", "0x4c1a0003")).clocks()
-    assert r.value is None and r.reason.startswith(FIXED) and "cannot read" not in r.reason
+    assert r.value is None and "stats could not be read" in r.reason and "cannot read the DUT" not in r.reason
 
 
 def test_twin_bare_metal_still_cannot_read_its_clock_back():
@@ -56,14 +54,12 @@ def bare_session(impl: str, shell_id: str, calls: list) -> NS:
     return NS(candidate=NS(identity=None), shell=object(), identity=identity)
 
 
-def test_a_cli_candidate_asks_the_session_and_a_linux_board_is_fixed():
+def test_a_cli_candidate_asks_the_session_and_a_linux_board_is_read_as_linux():
     calls: list = []
     clocks = Mps3Clocks(bare_session("linux", "0x44ee76d5", calls))
     (r,) = clocks.clocks()
-    assert (r.value, r.source, r.reason) == (50.0, "pin-model", FIXED_WHY)
+    assert (r.value, r.source) == (50.0, "pin-model") and r.reason.endswith(LINUX_WHY)
     clocks.clocks()
-    with pytest.raises(UnavailableError):
-        clocks.set_clock("dut", 25.0)
     assert calls == [1]                                    # asked once per adapter
 
 

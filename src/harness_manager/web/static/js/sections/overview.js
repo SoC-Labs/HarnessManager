@@ -512,16 +512,16 @@ function Readings({ bid }) {
       extra=${pts.length ? html`<${Spark} points=${pts} hover=${hover} onHover=${setHover} />` : null}
       src=${`${t.name} from ${t.source || "telemetry"}${t.observed_at ? ` at ${hhmm(t.observed_at)}` : ""}; the trend is this service's history (GET /readings/history). Warn at 50 °C, act at 60 °C.`} />`);
   }
-  // 3. DUT clock. UI2-POLISH (david, first real-board look): a rate the shell fixes (the Linux
-  // harness: the pin model's dut_clk, harness_manager_mps3/clock.py) is a plain fact, "fixed by the
-  // shell", never a warning; a Linux board with no rate known shows no tile (the row reflows); a
-  // bare-metal one, whose shell sets but cannot read it back, says "not reported" in grey.
+  // 3. DUT clock. HM 1.2 (LINUX-CLOCK): the Linux harness answers set_clk and reports dut_mhz, so
+  // a Linux board's clock is a plain reading with the adapter's reason ("set with presets 25, 50
+  // or 100 MHz; goes back to 50 MHz when the harness restarts") and its source; a Linux board with
+  // no rate known shows no tile (the row reflows); a bare-metal one, whose shell sets but cannot
+  // read it back, says "not reported" in grey.
   const hw = harnessWords(b);
   const ck = clockReading(bid);
   if (ck.r && has(ck.r.value)) {
-    const fixed = /fixed by the shell/.test(ck.r.reason || "");
-    cells.push(html`<${Kpi} label="DUT clock" lvl=${fixed ? "plain" : "ok"} value=${Number(ck.r.value)} unit=${ck.r.unit || "MHz"} testid="ov-kpi-clock"
-      sub=${[fixed ? "fixed by the shell" : [ck.r.reason || "reported", ck.r.source].filter(Boolean).join(" · ")]} stale=${stale} src=${ck.src} />`);
+    cells.push(html`<${Kpi} label="DUT clock" lvl=${hw.impl === "Linux" ? "plain" : "ok"} value=${Number(ck.r.value)} unit=${ck.r.unit || "MHz"} testid="ov-kpi-clock"
+      sub=${[[ck.r.reason || "reported", ck.r.source].filter(Boolean).join(" · ")]} stale=${stale} src=${ck.src} />`);
   } else if (hw.impl !== "Linux") {
     const why = (ck.r && ck.r.reason) || ck.why || "no clock adapter reports it";
     cells.push(html`<${Kpi} label="DUT clock" lvl="unk" unk value="not reported" sub=${[why]} src=${ck.src} testid="ov-kpi-clock" />`);

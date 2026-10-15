@@ -1,10 +1,11 @@
 """UI2-POLISH items 5 and 6 (david's first real-board look): the Overview's readings row.
 
 5. On a Linux board the DUT clock tile said "unavailable · the shell cannot read the DUT clock" in
-   the warning tint. The Linux harness's DUT clock is FIXED by the shell: the MPS3 pack now reports
-   the pin model's dut_clk rate with the reason "fixed by the shell" (harness_manager_mps3/clock.py),
-   and the tile shows "50 MHz · fixed by the shell", plain. With no rate known the tile is left out
-   and the row reflows.
+   the warning tint. LINUX-CLOCK (HM 1.2): the Linux harness answers set_clk and stats.dut_mhz, so the
+   MPS3 pack reports the board's own reading with the reason "set with presets 25, 50 or 100 MHz; goes
+   back to 50 MHz when the harness restarts" (harness_manager_mps3/clock.py), and the tile shows
+   "50 MHz" with that reason and the source, plain. With no rate known the tile is left out and the
+   row reflows.
 6. No "?" in the readings: a counter the harness does not send is "not reported" with a short reason
    in neutral grey, and a value that DOES exist is the number (Partition swaps: the ICAP bytes when
    there is no swap count; Network: tx when there is no rx).
@@ -32,10 +33,11 @@ expect = sync_api.expect
 pytestmark = pytest.mark.browser
 T = 15_000
 APP = {"width": 1440, "height": 900}
-FIXED = {"name": "dut", "value": 50.0, "unit": "MHz", "source": "the pin model, shell 0x44ee76d5",
-         "reason": "fixed by the shell", "available": True}
+LINUX_REASON = "set with presets 25, 50 or 100 MHz; goes back to 50 MHz when the harness restarts"
+FIXED = {"name": "dut", "value": 50.0, "unit": "MHz", "source": "board stats (clk_wiz_dut read-back)",
+         "reason": LINUX_REASON, "available": True}
 NO_RATE = {"name": "dut", "value": None, "unit": "MHz", "source": "the pin model", "available": False,
-           "reason": "fixed by the shell; the pin model has no rate for shell 0x4c1a0003"}
+           "reason": "the board's stats could not be read, and the pin model has no rate for shell 0x4c1a0003"}
 
 
 def by_id(page: Any, name: str) -> Any:
@@ -107,7 +109,7 @@ def token(page: Any, name: str) -> str:
 # --- 5. the DUT clock on a Linux board ----------------------------------------------------------------
 
 
-def test_a_linux_boards_dut_clock_is_the_shells_fixed_rate_plain_not_a_warning(showcase):  # noqa: F811
+def test_a_linux_boards_dut_clock_is_the_boards_reading_plain_not_a_warning(showcase):  # noqa: F811
     def setup(page):
         route_json(page, BOARD_LINUX, "/telemetry", no_dut_clk)          # a real board: no dut_clk
         route_answer(page, BOARD_LINUX, "/clocks", [FIXED])               # the pack's answer
@@ -115,7 +117,9 @@ def test_a_linux_boards_dut_clock_is_the_shells_fixed_rate_plain_not_a_warning(s
     tile = by_id(page, "ov-kpi-clock")
     expect(tile).to_contain_text("50", timeout=T)
     expect(tile).to_contain_text("MHz")
-    expect(tile).to_contain_text("fixed by the shell")
+    expect(tile).to_contain_text("goes back to 50 MHz when the harness restarts")
+    expect(tile).to_contain_text("board stats (clk_wiz_dut read-back)")
+    assert "fixed by the shell" not in tile.inner_text()
     expect(tile).to_have_attribute("data-level", "plain")
     assert css(tile, "backgroundColor") in ("rgba(0, 0, 0, 0)", "transparent")       # no tint
     for word in ("unavailable", "cannot read", "?"):

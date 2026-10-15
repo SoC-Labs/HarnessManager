@@ -299,6 +299,10 @@ class HarnessFakeShell(FakeShell):
             return reply
         with self._lock:
             last = self.swaps[-1] if self.swaps else None
+            preset = self.clk_requests[-1] if self.clk_requests else ""
+            # harnessd answers dut_mhz from the clk_wiz_dut register file: the last set_clk
+            # preset, else the BD's 50 MHz.
+            mhz = int(preset[:-3]) if preset.endswith("mhz") and preset[:-3].isdigit() else 50
             reply: dict[str, Any] = {
                 "ok": True, "up_ms": self.up_ms(), "sid": _hex32(self.static_id),
                 "rm": _hex32(self.current_rm_id), "rm_ok": bool(self.rm_id_valid),
@@ -308,7 +312,7 @@ class HarnessFakeShell(FakeShell):
                 "swap": "await_partial" if self._swap_in_flight else "idle",
                 "swap_ok": bool(last and last.get("final") == "DONE"),
                 "swap_n": len(self.swaps), "icap": 0, "rxdrop": 0, "txerr": 0,
-                "swap_err": "", "clr_ok": True, "dut_mhz": 50, "svc_max_us": 0,
+                "swap_err": "", "clr_ok": True, "dut_mhz": mhz, "svc_max_us": 0,
                 "svc_skipped": 0,
             }
             if self.impl:
