@@ -56,13 +56,21 @@ def locked(shell=NEW_STATIC, usercode=USERCODE, impl="linux") -> BoardIdentity:
                          firmware_sha="deadbeef", ver32="0x21000000")
 
 
-def view(ident, usb=False) -> BoardView:
+def booted(sid=FIELDED_STATIC) -> dict:
+    """slot status as board 1 answered it in the locked state (field_b1, 14 Oct): slot A runs
+    v2.1's image, whose record binds the OLD static, on the re-keyed fabric."""
+    return {"A": SlotInfo("A", state=SLOT_VALID, hdr_crc="0xd8abb834", sid=sid,
+                          verified=VERIFIED_BOOT, version="2.1.0"),
+            "B": SlotInfo("B", state=SLOT_VALID, hdr_crc="0x314076d0", sid=sid)}
+
+
+def view(ident, usb=False, running_sid=FIELDED_STATIC) -> BoardView:
     return BoardView(board_id="mps3@t", pack="mps3", identity=ident, has_os_slots=True,
-                     has_storage=usb, has_controller=usb)
+                     has_storage=usb, has_controller=usb, os_slot_infos=booted(running_sid))
 
 
-def plan(ch, ident, usb=False):
-    v = view(ident, usb)
+def plan(ch, ident, usb=False, running_sid=FIELDED_STATIC):
+    v = view(ident, usb, running_sid)
     p = make_plan(ch, v, app_version="1.2.0")
     return p, v
 
@@ -119,7 +127,7 @@ def world(tmp_path):
                                                             str(b.root / "channel" / "stable"))
     slots = FakeOsSlots(fabric_sid=NEW_STATIC, slots={"A": SlotInfo("A", state=SLOT_VALID, hdr_crc="0xaaaaaaaa",
                                              verified=VERIFIED_BOOT, image_sha256="a" * 64,
-                                             version="2.1.0"),
+                                             version="2.1.0", sid=FIELDED_STATIC),
                                "B": SlotInfo("B", state=SLOT_VALID, hdr_crc="0xbbbbbbbb",
                                              verified="readback", version="2.0.0")})
     session = StubSession(locked(), os_slots=slots)
@@ -134,7 +142,7 @@ def test_the_os_only_install_pushes_commits_and_reboots_without_storage(world):
     p = make_plan(verified.channel, BoardView(
         board_id=session.candidate.board_id, pack="mps3", identity=session.ident,
         has_os_slots=True, os_active_sha=st.active_info.image_sha256,
-        os_active_crc=st.active_info.hdr_crc), app_version="1.2.0")
+        os_active_crc=st.active_info.hdr_crc, os_slot_infos=dict(st.slots)), app_version="1.2.0")
     assert (p.base, p.os_slot, p.blockers) == (False, True, [])
     assert p.reboot_wait_s is not None
     out = installer.run(session, p, p.approve(), verified)
@@ -145,3 +153,18 @@ def test_the_os_only_install_pushes_commits_and_reboots_without_storage(world):
 def test_twin_the_same_board_with_a_base_would_need_storage(tmp_path):
     p, _ = plan(parsed(tmp_path), locked(usercode="0x12345678"))
     assert p.base and any("Debug USB" in b for b in p.blockers)
+
+
+def test_twin_a_running_image_for_the_fabric_s_own_static_still_writes_its_base(tmp_path):
+    # The regression (15 Oct gate, test_t7_os_slots): a same-static release whose config SD
+    # changed is NOT the locked state; only an image provisioned for ANOTHER static is.
+    p, _ = plan(parsed(tmp_path), locked(), usb=True, running_sid=NEW_STATIC)
+    assert p.base and p.os_slot and WARNING not in p.warnings
+
+
+def test_twin_no_slot_record_is_not_taken_as_the_locked_state(tmp_path):
+    ch = parsed(tmp_path)
+    v = BoardView(board_id="mps3@t", pack="mps3", identity=locked(), has_os_slots=True,
+                  has_storage=True, has_controller=True)
+    p = make_plan(ch, v, app_version="1.2.0")
+    assert p.base and WARNING not in p.warnings

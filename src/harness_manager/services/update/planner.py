@@ -43,6 +43,7 @@ from .schema import (
     os_header_crc,
     os_provisioned_static,
 )
+from .os_slots import VERIFIED_BOOT
 from .version import at_least, compare_safe, same_version
 from .version import same_u32 as _same_u32
 
@@ -502,6 +503,17 @@ def running_by_os_image(releases: Iterable[HarnessRelease], ident: BoardIdentity
     return hits[0] if len({r.version for r in hits}) == 1 else None
 
 
+def _runs_an_image_for_another_static(board: BoardView, fabric_sid: str) -> bool:
+    """Does the board run an OS image provisioned for another static than its fabric's? The
+    booted slot (``verified`` "boot") whose record binds a static (``sid``) that is not the
+    fabric's: v2.1 Linux on a re-keyed fabric (identity-locked; field_b1, 14 Oct)."""
+    for info in (board.os_slot_infos or {}).values():
+        sid = str(getattr(info, "sid", "") or "")
+        if getattr(info, "verified", "") == VERIFIED_BOOT and sid and not _same_u32(sid, fabric_sid):
+            return True
+    return False
+
+
 def base_differs(rel: HarnessRelease, ident: BoardIdentity) -> bool:
     """Would installing ``rel`` change the base the board runs? A differing ver32 does;
     then the firmware sha decides when both sides have one; then a matching ver32 says
@@ -636,11 +648,15 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
             _same_u32(rel.identity.static_id, ident.shell_id) and \
             (running is None or not _same_u32(running.identity.static_id, ident.shell_id)) and \
             not (rel.identity.usercode and ident.usercode and
-                 not _same_u32(rel.identity.usercode, ident.usercode)):
+                 not _same_u32(rel.identity.usercode, ident.usercode)) and \
+            _runs_an_image_for_another_static(board, ident.shell_id):
         # Identity-locked: the fabric is this release's (static, and usercode when both sides
         # report one) but the Linux on the user microSD is older (a re-key upgrade whose config
         # SD is written and REBOOTed). The config-SD base is in place; what differs in
         # harness / fw_sha / ver32 is the OS image, which the os-slot component replaces.
+        # The positive sign (silicon, board 1, 14 Oct): the RUNNING slot's image was provisioned
+        # for another static than the fabric's. Without it, a same-static release whose config
+        # SD changed (the base really differs) still writes its base.
         base_needed = False
         plan.warnings.append(
             f"the board already runs harness {rel.version}'s fabric (static "
