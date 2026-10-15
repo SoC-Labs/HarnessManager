@@ -41,6 +41,7 @@ claim is ours, else ``ClaimLockedError`` with the claim hint).
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import replace
 from typing import Any
 
@@ -100,12 +101,17 @@ class Mps3Card:
     ``usd``, nothing written), and a commit sends its pair with the same commit pusher
     "Keep on the card" uses (``Mps3Deploy.commit_pusher``)."""
 
+    #: How ``commit`` waits before its busy retry (a test seam).
+    _sleep = staticmethod(time.sleep)
+
     def __init__(self, session: Any, *, commit_timeout_s: float | None = None) -> None:
         self._session = session
         #: None: ``commit_budget(pair bytes)``; a number: fixed (a test seam).
         self.commit_timeout_s = commit_timeout_s
         #: The pusher the last commit built (tests read its transport).
         self.last_pusher: Any = None
+        #: The wait before the one retry of a commit refused ``bad args`` (a test seam).
+        self.busy_retry_s = BUSY_RETRY_S
 
     # -- plumbing -------------------------------------------------------------------------------
 
@@ -288,15 +294,26 @@ class Mps3Card:
                 static_id=rmid.parse_rm_id(live.shell_id), features=tuple(live.features)))
 
         what = f"the card commit of {name}"
-        if self._route(what, live.impl) == "board-ssh":
-            with claim_forward(self._session, "card", what) as (host, ctl, push):
-                reply = send(host, ctl, push)
-        else:
+
+        def attempt() -> Any:
+            if self._route(what, live.impl) == "board-ssh":
+                with claim_forward(self._session, "card", what) as (host, ctl, push):
+                    return send(host, ctl, push)
             reply = send(shell.host, shell.port, None)
             if not reply.ok and slot_words.is_claim_lock(str(reply.err or "")):
                 self._route(what, live.impl, claimed=True)     # not ours: the hint
                 with claim_forward(self._session, "card", what) as (host, ctl, push):
                     reply = send(host, ctl, push)
+            return reply
+
+        reply = attempt()
+        if not reply.ok and str(reply.err or "").strip() == "bad args":
+            # The pair fits (checked above), so the card was busy with the previous commit:
+            # wait, then one retry (the same pair again; a refused commit wrote nothing).
+            report("commit-retry", 0, total)
+            self._sleep(self.busy_retry_s)
+            sent.clear()
+            reply = attempt()
         if not reply.ok:
             raise _usd_error(f"card commit of {name}", reply.err)
         report("commit", total, total)
@@ -345,6 +362,12 @@ def commit_budget(nbytes: int) -> Any:
 DEFAULT_SLOT_MIB = 8
 SLOT_TOO_SMALL = ("This card's design slots are 8 MiB. Re-make the card in layout v2 "
                   "(32 MiB slots) to keep this design on it.")
+#: A commit refused ``bad args`` although its pair fits (checked before sending): the card was
+#: still finishing the previous commit (silicon, 15 Oct: a retry 1-2 min later works).
+CARD_BUSY = ("the card was still finishing the last save, so it refused this one; the card "
+             "keeps the design it had. Try again in a minute or two.")
+#: How long ``commit`` waits before its one automatic retry after such a refusal.
+BUSY_RETRY_S = 90.0
 
 
 def slot_capacity_refusal(slot_mb: int | None, size_bytes: int | None) -> str:
@@ -396,9 +419,9 @@ def _usd_error(what: str, err: str) -> HarnessError:
     if e == "unavailable":
         return UnavailableError(CAPABILITY, "the harness's card store is unavailable")
     if e == "bad args" and "commit" in what:
-        # The engine's answer to a design bigger than the card's slot (nothing else in a
-        # commit's arguments can be wrong: HM builds them).
-        return RefusedError(SLOT_TOO_SMALL, hint="the card keeps the design it had")
+        # ``commit`` refuses an over-size pair before sending, so the engine's ``bad args``
+        # here means the card was still busy with the previous commit (silicon, 15 Oct).
+        return HeldError(f"{what}: {CARD_BUSY}", hint="the card keeps the design it had")
     return ActionFailedError(f"{what} failed: {e or 'no reason given'}",
                              hint="the card keeps its previous default")
 

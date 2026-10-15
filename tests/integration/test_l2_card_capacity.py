@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from harness_manager.core.errors import RefusedError
+from harness_manager.core.errors import HeldError, RefusedError
 from harness_manager.core.pack import CardStatus
 from harness_manager.services import slots as slots_mod
 from harness_manager.services.slots import card_status_from_json, card_status_json
@@ -95,9 +95,13 @@ def test_capacity_rule():
     assert f(8, None) == "" and f(8, 0) == ""
 
 
-def test_bad_args_on_a_commit_means_the_slot_is_too_small():
+def test_bad_args_on_a_commit_means_the_card_was_busy_not_too_small():
+    # CARD-BUSY (15 Oct, silicon): an over-size pair is refused BEFORE it is sent
+    # (slot_capacity_refusal), so the engine's later ``bad args`` is a card still finishing the
+    # previous commit; tests/integration/test_card_busy_retry.py covers the retry.
     err = card_mod._usd_error("card commit of multicore", "bad args")
-    assert isinstance(err, RefusedError) and err.message == SENTENCE
+    assert isinstance(err, HeldError) and card_mod.CARD_BUSY in err.message
+    assert SENTENCE not in err.message
 
 
 def test_negative_twin_bad_args_elsewhere_stays_a_failure():

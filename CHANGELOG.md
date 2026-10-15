@@ -77,6 +77,9 @@ boards behave as before.
   image over Ethernet and no longer asks for the Debug USB or rewrites the config SD.
 
 ### Fixes
+- **Saving a design to the card right after another save.** The card can refuse a save while
+  it is still finishing the previous one. `card commit` now waits and tries once more; if the
+  card is still busy, it and Keep on card say so (they used to say the design was too big).
 - Background errors read in plain words, not as raw exception text or JSON.
 - Claim and lease times show in your local time, not UTC.
 - Hub boards no longer say "this PC must be on the same /24".

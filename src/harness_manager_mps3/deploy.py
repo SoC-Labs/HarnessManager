@@ -884,6 +884,13 @@ def card_outcome(persist: PersistResult | None) -> CardOutcome:
                 "`harness-manager board claim-status TARGET` (a claim made elsewhere: "
                 "`harness-manager board claim TARGET --adopt`), then `harness-manager card "
                 "commit TARGET`"))
+        if str(persist.err or "").strip() == "bad args":
+            # The card was still finishing a previous commit (silicon, 15 Oct); the pair's
+            # size is not the cause (an over-size pair is refused before it is sent).
+            from .card import CARD_BUSY
+
+            return CardOutcome(kept=False, why=f"{CARD_BUSY} (`harness-manager card commit "
+                                               "TARGET` keeps the running design)")
         if board_idle_abort(str(persist.err or "")):
             return CardOutcome(kept=False, why=BOARD_IDLE_ABORT_WHY.format(err=persist.err))
         return CardOutcome(kept=False, why=f"the card write failed ({persist.err}); the card "
