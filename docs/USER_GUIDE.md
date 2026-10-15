@@ -893,7 +893,11 @@ does not fail the program: the new design runs, and the card keeps the one it ha
 **Related:** reset the DUT with `harness-manager reset 192.168.10.101` (the Board tile's
 **Reset DUT**, after ticking **Arm**). Set its clock with
 `harness-manager clock 192.168.10.101 --dut-mhz 50` or `--preset 25mhz` (the **Clocks**
-section).
+section). The clock takes one of three presets: 25, 50 or 100 MHz. On a board that runs the
+Linux harness it is read back from the board ("board stats (clk_wiz_dut read-back)"), and it
+goes back to 50 MHz when the harness restarts. Setting it needs the board's claim, like a
+reset: on a board claimed by someone else the set is refused. If the board's stats cannot be
+read, the reading says so and shows the 50 MHz start-up rate.
 
 **What can go wrong**
 
