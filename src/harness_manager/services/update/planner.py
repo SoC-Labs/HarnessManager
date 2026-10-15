@@ -631,6 +631,21 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
                              f"{rel.version} (from the signed release history)")
     os_comp = next((c for c in rel.components if c.kind == KIND_OS_SLOT), None)
     os_needed = os_comp is not None and not os_image_running(os_comp, board)
+    if base_needed and os_needed and not overlays_only and rel.identity.impl == "linux" and \
+            board.identity_known and ident.shell_id and \
+            _same_u32(rel.identity.static_id, ident.shell_id) and \
+            (running is None or not _same_u32(running.identity.static_id, ident.shell_id)) and \
+            not (rel.identity.usercode and ident.usercode and
+                 not _same_u32(rel.identity.usercode, ident.usercode)):
+        # Identity-locked: the fabric is this release's (static, and usercode when both sides
+        # report one) but the Linux on the user microSD is older (a re-key upgrade whose config
+        # SD is written and REBOOTed). The config-SD base is in place; what differs in
+        # harness / fw_sha / ver32 is the OS image, which the os-slot component replaces.
+        base_needed = False
+        plan.warnings.append(
+            f"the board already runs harness {rel.version}'s fabric (static "
+            f"{rel.identity.static_id}); only its OS image is older: this installs the OS "
+            "image over Ethernet")
     if overlays_only:
         base_needed = os_needed = False
         if not board.identity_known or not ident.shell_id:
