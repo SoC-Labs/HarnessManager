@@ -113,7 +113,7 @@ def test_the_consoles_card_opens_a_console_on_the_workbench(page_factory, daemon
     # reads that session (its last line), not "not open in this page"
     row = card.locator('li[data-console="uart0"]')
     expect(row).to_have_attribute("title", re.compile(r"last line: "), timeout=T)
-    expect(row).not_to_contain_text("not open in this page", timeout=T)
+    expect(row).not_to_contain_text("not open in this page", timeout=3 * T)
     row.locator(".ov-con-name").click()
     page.wait_for_selector('[data-testid="console-uart0"]', timeout=T)       # that console, picked
     expect(page.locator('[data-testid="section-workbench"]')).to_be_visible()

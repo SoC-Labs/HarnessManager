@@ -20,9 +20,17 @@ def open_picker(page: Any) -> None:
     """Open the design list (idempotent)."""
     p = picker(page)
     p.wait_for(timeout=T)
-    if p.get_attribute("aria-expanded") != "true":
-        p.click()
-    page.locator('[data-testid="design-list"]').wait_for(timeout=T)
+    for attempt in range(3):
+        # A list that is closing (Escape just pressed) still says aria-expanded=true for a
+        # moment: reading that and not clicking left the list to close under us (CI flake).
+        if p.get_attribute("aria-expanded") != "true":
+            p.click()
+        try:
+            page.locator('[data-testid="design-list"]').wait_for(timeout=T if attempt == 2 else 2500)
+            return
+        except Exception:
+            if attempt == 2:
+                raise
 
 
 def pick(page: Any, name: str, *, wait: bool = False) -> None:

@@ -12,6 +12,7 @@ in the service's own config dir here (the mock's temporary one, or the real daem
 from __future__ import annotations
 
 import json
+import time
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
@@ -47,6 +48,17 @@ hub = {{ use = "mapstone-dev", target = "mps3_01_pl" }}
 
 def rail_ids(page) -> list[str]:
     return page.eval_on_selector_all(".rail-card", "els => els.map(e => e.dataset.board)")
+
+
+def settled(page, want: list[str]) -> list[str]:
+    """The rail's order once it is ``want`` (up to T): a drop re-renders a beat after the mouse
+    is up, and a slow runner showed the old order to an immediate read."""
+    deadline = time.monotonic() + T / 1000
+    got = rail_ids(page)
+    while got != want and time.monotonic() < deadline:
+        page.wait_for_timeout(100)
+        got = rail_ids(page)
+    return got
 
 
 def card(page, bid: str):
@@ -100,7 +112,7 @@ def test_drag_reorders_the_rail_and_the_order_persists_across_a_reload(page_fact
     expect(card(page, first)).to_have_attribute("aria-current", "true", timeout=T)
     drag(page, third, first)
     expect(page.locator(".rail-card")).to_have_count(3)
-    assert rail_ids(page) == [third, first, second]
+    assert settled(page, [third, first, second]) == [third, first, second]
     # the drag opened nothing: the selection and the workspace are the first board's
     expect(card(page, third)).to_have_attribute("aria-current", "false")
     expect(card(page, first)).to_have_attribute("aria-current", "true")
@@ -111,7 +123,7 @@ def test_drag_reorders_the_rail_and_the_order_persists_across_a_reload(page_fact
     # and down again, below the last card
     drag(page, third, second, below=True)
     expect(page.locator(".rail-card").first).to_have_attribute("data-board", first)
-    assert rail_ids(page) == [first, second, third]
+    assert settled(page, [first, second, third]) == [first, second, third]
     wait_setting(page, daemon, ORDER, [first, second, third])
     assert page.errors == []
 
@@ -128,7 +140,7 @@ def test_negative_twin_a_click_without_a_drag_opens_the_board_and_keeps_the_orde
     page.mouse.up()
     expect(card(page, target)).to_have_attribute("aria-current", "true", timeout=T)
     expect(page.locator('[data-action="open"], [data-testid="board-header"]').first).to_be_visible(timeout=T)
-    assert rail_ids(page) == ids
+    assert settled(page, ids) == ids
     page.wait_for_timeout(600)                    # longer than the save's debounce
     assert setting(daemon, ORDER) == []           # nothing moved, nothing written
     assert page.errors == []
@@ -146,7 +158,7 @@ def test_alt_arrows_move_the_focused_board_and_a_screen_reader_hears_where(page_
     card(page, third).focus()
     page.keyboard.press("Alt+ArrowUp")
     expect(page.locator(".rail-card").nth(1)).to_have_attribute("data-board", third, timeout=T)
-    assert rail_ids(page) == [first, third, second]
+    assert settled(page, [first, third, second]) == [first, third, second]
     expect(announce).to_contain_text("moved to position 2 of 3", timeout=T)
     # the focus stays on the board that moved, so the next press moves it again
     page.wait_for_function(f"document.activeElement && document.activeElement.dataset.board === {json.dumps(third)}",
@@ -160,10 +172,10 @@ def test_alt_arrows_move_the_focused_board_and_a_screen_reader_hears_where(page_
     # twin: an arrow without Alt moves nothing (and a card's Enter still opens it)
     page.keyboard.press("ArrowDown")
     page.wait_for_timeout(400)
-    assert rail_ids(page) == [third, first, second]
+    assert settled(page, [third, first, second]) == [third, first, second]
     page.keyboard.press("Enter")
     expect(card(page, third)).to_have_attribute("aria-current", "true", timeout=T)
-    assert rail_ids(page) == [third, first, second]
+    assert settled(page, [third, first, second]) == [third, first, second]
     assert page.errors == []
 
 
@@ -182,7 +194,7 @@ def test_a_star_pins_the_board_at_the_top_persists_and_unstarring_restores_the_o
     expect(page.locator('[data-testid="rail-group-fav"] .rail-card')).to_have_count(1, timeout=T)
     expect(page.locator('[data-testid="rail-group-fav"] .rail-card')).to_have_attribute("data-board", last)
     expect(star).to_have_attribute("aria-pressed", "true")
-    assert rail_ids(page) == [last, ids[0], ids[1]]
+    assert settled(page, [last, ids[0], ids[1]]) == [last, ids[0], ids[1]]
     expect(page.locator(".rail-group-title").first).to_contain_text("Favourites")
     expect(page.locator('[data-testid="rail-announce"]')).to_contain_text("added to Favourites", timeout=T)
     wait_setting(page, daemon, FAVS, [last])
@@ -193,7 +205,7 @@ def test_a_star_pins_the_board_at_the_top_persists_and_unstarring_restores_the_o
     wait_rail(page, 3)
     expect(page.locator('[data-testid="rail-group-fav"] .rail-card')).to_have_attribute("data-board", last,
                                                                                        timeout=T)
-    assert rail_ids(page) == [last, ids[0], ids[1]]
+    assert settled(page, [last, ids[0], ids[1]]) == [last, ids[0], ids[1]]
     # a new window (nothing selected in it yet) starts on the first board shown: the favourite
     fresh = page_factory()
     wait_rail(fresh, 3)
@@ -206,7 +218,7 @@ def test_a_star_pins_the_board_at_the_top_persists_and_unstarring_restores_the_o
     page.keyboard.press("Space")
     expect(star).to_have_attribute("aria-pressed", "false", timeout=T)
     expect(page.locator('[data-testid="rail-group-fav"]')).to_have_count(0)
-    assert rail_ids(page) == ids
+    assert settled(page, ids) == ids
     expect(page.locator('[data-testid="rail-announce"]')).to_contain_text("removed from Favourites", timeout=T)
     wait_setting(page, daemon, FAVS, [])
     assert page.errors == []
@@ -219,16 +231,16 @@ def test_negative_twin_a_move_inside_the_favourites_keeps_the_other_boards_order
     for bid in (b, c):
         page.locator(f'.rail-card[data-board="{bid}"] [data-testid="rail-star"]').click()
     expect(page.locator('[data-testid="rail-group-fav"] .rail-card')).to_have_count(2, timeout=T)
-    assert rail_ids(page) == [b, c, a]
+    assert settled(page, [b, c, a]) == [b, c, a]
     card(page, c).focus()
     page.keyboard.press("Alt+ArrowUp")
     expect(page.locator('[data-testid="rail-announce"]')).to_contain_text("position 1 of 2 in Favourites", timeout=T)
-    assert rail_ids(page) == [c, b, a]
+    assert settled(page, [c, b, a]) == [c, b, a]
     # a drag never crosses into the other group: past the last favourite it stays last there
     drag(page, c, a, below=True, check_line=False)
     expect(page.locator('[data-testid="rail-group-fav"] .rail-card').last).to_have_attribute("data-board", c,
                                                                                             timeout=T)
-    assert rail_ids(page) == [b, c, a]
+    assert settled(page, [b, c, a]) == [b, c, a]
     assert page.errors == []
 
 
