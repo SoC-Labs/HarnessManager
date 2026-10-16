@@ -13,7 +13,9 @@ JS = Path(__file__).resolve().parents[2] / "src/harness_manager/web/static/js"
 
 
 def _node(src: str, tz: str) -> str:
-    return subprocess.run(["node", "-e", src], capture_output=True, text=True, check=True,
+    # node by its full path: a runner may keep it outside /usr/bin (Homebrew, setup-node)
+    node = shutil.which("node") or "node"
+    return subprocess.run([node, "-e", src], capture_output=True, text=True, check=True,
                           env={"TZ": tz, "PATH": "/usr/bin:/bin:/usr/local/bin"}).stdout.strip()
 
 

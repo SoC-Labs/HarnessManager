@@ -677,6 +677,7 @@ def test_negative_twin_a_console_that_connects_returns_what_it_read(capsys, tmp_
 # --- MCC reads over a hub share, back to back (finding for the LR lanes: hub.py) --------------
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="runs the hub-side MCC reader script, which reads /proc (the hub is Linux)")
 def test_back_to_back_mcc_reads_over_a_hub_share_both_work(tmp_path, monkeypatch):
     from harness_manager.core.services import EngineConfig
     from tests.fakes.l1_rig import BOARD_IP, lab

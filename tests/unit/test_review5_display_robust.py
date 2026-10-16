@@ -236,7 +236,7 @@ def hello_raw(key: str, literal: str) -> bytes:
     hello_raw("max_msg", "Infinity"), hello_raw("max_msg", "-Infinity"),
     hello_raw("proto", "Infinity"), hello_raw("w", "1e400"),
     w.message(w.T_HELLO, ('{"a":' + "[" * 20000 + "]" * 20000 + "}").encode()),
-    hello_raw("x", "[" * 5000 + "]" * 5000),
+    hello_raw("x", "[" * 50000 + "]" * 50000),   # deep enough to trip any platform's limit (3.12 on macOS parses 5000)
 ], ids=["max_msg-inf", "max_msg--inf", "proto-inf", "w-1e400", "nested-20000", "nested-key"])
 def test_a_hello_the_json_decoder_chokes_on_is_a_wire_error(data: bytes) -> None:
     """Before the fix these escaped as OverflowError / RecursionError: the upstream thread

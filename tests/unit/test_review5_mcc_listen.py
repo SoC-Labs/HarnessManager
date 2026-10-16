@@ -55,7 +55,8 @@ def _window_read(listen_s: float | None) -> tuple[Any, dict[str, Any]]:
         return mcc, json.loads(res.stdout.strip().splitlines()[-1])
 
 
-@pytest.mark.skipif(not hasattr(os, "openpty"), reason="no PTYs on this system")
+@pytest.mark.skipif(not hasattr(os, "openpty") or sys.platform != "linux",
+                    reason="the hub reader script runs on the Linux hub: it reads /proc, and needs PTYs")
 def test_the_hub_reader_types_nothing_in_the_silent_autoboot_window():
     """REVIEW-W5 3: 0.3 s of silence could not tell the MCC's 3 s auto-boot window from an
     idle MCC, and the reader's CR STOPPED the boot. Now it listens 3.5 s: it hears the banner
@@ -65,7 +66,8 @@ def test_the_hub_reader_types_nothing_in_the_silent_autoboot_window():
     assert info["rc"] == 6 and info["heard"]
 
 
-@pytest.mark.skipif(not hasattr(os, "openpty"), reason="no PTYs on this system")
+@pytest.mark.skipif(not hasattr(os, "openpty") or sys.platform != "linux",
+                    reason="the hub reader script runs on the Linux hub: it reads /proc, and needs PTYs")
 def test_twin_the_script_holds_its_floor_whatever_it_is_sent():
     """An old caller that still sends ``listen_s`` 0.3 gets 3.5 s all the same."""
     mcc, info = _window_read(0.3)

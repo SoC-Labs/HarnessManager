@@ -147,6 +147,9 @@ class _NoBoards:
 
 def test_none_found_on_windows_says_where_windows_shows_the_drive_and_ports(monkeypatch):
     monkeypatch.setattr("sys.platform", "win32")
+    # the hints are under test, not this PC's network check (which would look for a real
+    # PowerShell, and shutil.which breaks on a non-Windows host that fakes sys.platform)
+    monkeypatch.setattr(bringup, "network_check", lambda host: None)
     out = bringup.scan(_NoBoards())
     assert out["empty"]["check"] == list(bringup.WINDOWS_NONE_FOUND_HINTS)
     assert any("File Explorer, This PC" in c for c in out["empty"]["check"])
