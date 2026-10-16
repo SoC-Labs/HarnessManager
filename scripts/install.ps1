@@ -523,7 +523,7 @@ try {
                 $hint = "Harness Manager needs Python $MinPy or newer, and none was found.`n" +
                         "  Install Python from python.org (in PowerShell):`n" +
                         "    Invoke-WebRequest https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe -OutFile `$env:TEMP\py312.exe`n" +
-                        "    Start-Process `$env:TEMP\py312.exe -ArgumentList '/quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1' -Wait`n"
+                        "    & `$env:TEMP\py312.exe /quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 | Out-Null`n"
                 if (Get-Command winget -ErrorAction SilentlyContinue) {
                     $hint += "  or with winget: winget install Python.Python.3.12`n"
                 }
