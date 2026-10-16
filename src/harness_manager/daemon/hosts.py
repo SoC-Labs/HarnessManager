@@ -28,6 +28,7 @@ import ipaddress
 import json
 import logging
 import socket
+import threading
 from collections.abc import Iterable
 from typing import Any
 
@@ -76,6 +77,24 @@ def _loopback(name: str) -> bool:
         return False
 
 
+def _bounded(fn: Any, timeout_s: float = 3.0) -> str:
+    """``fn()`` (a name lookup), or "" if it takes longer than ``timeout_s``: on macOS
+    ``socket.getfqdn`` can block for a minute or more on a reverse lookup of the machine's
+    own ``.local`` name, and the service must still start. The lookup thread is a daemon."""
+    box: list[str] = []
+
+    def run() -> None:
+        try:
+            box.append(fn())
+        except OSError:
+            pass
+
+    t = threading.Thread(target=run, name="hm-hostname-lookup", daemon=True)
+    t.start()
+    t.join(timeout_s)
+    return box[0] if box else ""
+
+
 def allowed_hosts(listen: str = "127.0.0.1", extra: Iterable[str] = ()) -> frozenset[str]:
     """The names a service listening on ``listen`` answers to (the loopback names always)."""
     names = set(LOOPBACK_NAMES)
@@ -85,10 +104,7 @@ def allowed_hosts(listen: str = "127.0.0.1", extra: Iterable[str] = ()) -> froze
     if not _loopback(bind) or bind in WILDCARDS:
         names.add(ANY_IP)
         for fn in (socket.gethostname, socket.getfqdn):
-            try:
-                name = normalise(fn())
-            except OSError:
-                continue
+            name = normalise(_bounded(fn))
             if name:
                 names.add(name)
     names |= {normalise(h) for h in extra if normalise(h)}

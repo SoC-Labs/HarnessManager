@@ -81,3 +81,23 @@ def test_negative_twin_a_broken_settings_file_leaves_loopback_only(tmp_path, mon
 def test_the_refusal_names_the_way_out_and_never_more_than_the_name():
     err = hosts.refusal("x" * 500 + ":80")
     assert err.code == 15 and "advanced.allowed_hosts" in err.hint and len(err.message) < 200
+
+
+def test_a_hostname_lookup_that_hangs_does_not_hold_up_the_service():
+    """macOS: socket.getfqdn() can block for over a minute on the machine's own .local name."""
+    import threading
+    import time
+
+    gate = threading.Event()
+    t0 = time.monotonic()
+    assert hosts._bounded(lambda: gate.wait(30) and "never", timeout_s=0.2) == ""
+    assert time.monotonic() - t0 < 5
+    gate.set()
+
+
+def test_twin_a_prompt_or_failing_lookup_still_gives_its_answer_or_nothing():
+    def boom() -> str:
+        raise OSError("no resolver")
+
+    assert hosts._bounded(lambda: "hub.example") == "hub.example"
+    assert hosts._bounded(boom) == ""
