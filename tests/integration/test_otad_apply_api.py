@@ -591,3 +591,34 @@ def test_negative_twin_a_helper_whose_old_daemon_never_exits_changes_nothing(tmp
     rec = json.loads(su.last_apply_path(sd).read_text())
     assert (rc, rec["result"], rec["phase"]) == (4, "not-started", "stop")
     assert spawned == [] and json.loads((root / "current.json").read_text())["current"] == ""
+
+
+
+# --- 16 Oct, a Mac: an OLDER staged version is never an update ---------------------------------
+
+
+def _stage_older(w: dict, old: str = "0.0.1") -> str:
+    root = w["root"]
+    (root / "versions" / old / "bin").mkdir(parents=True)
+    (root / "versions" / old / "bin" / "python").write_text("old python")
+    ptr = json.loads((root / "current.json").read_text())
+    ptr["versions"][old] = {"state": "staged", "at": 0.0}
+    (root / "current.json").write_text(json.dumps(ptr))
+    return old
+
+
+def test_an_older_staged_version_is_not_offered(world):
+    w = world
+    _stage_older(w)
+    body = w["client"].get("/api/v1/update/app", headers=H).json()
+    assert body["staged"] == [NEW]
+
+
+def test_twin_applying_an_older_staged_version_is_refused_and_nothing_restarts(world):
+    w = world
+    old = _stage_older(w)
+    r = apply(w, version=old)
+    err = r.json()["error"]
+    assert (r.status_code, err["name"]) == (409, "REFUSED"), r.text
+    assert "older than the one that runs" in err["message"] and "rollback" in err["hint"]
+    assert apply_state(w)["state"] == "idle" and w["rec"].spawned == []

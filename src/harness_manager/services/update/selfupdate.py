@@ -294,10 +294,12 @@ def status_view(svc: Any, state_dir: Path) -> dict[str, Any]:
         if info.get("state") == "bad" and v not in bad:
             bad[v] = {"reason": info.get("reason", ""), "phase": info.get("phase", ""),
                       "at": info.get("at")}
-    # ready to apply: staged, not bad, not what the pointer runs or this process is
+    # ready to apply: staged, not bad, not what the pointer runs, and NEWER than this process
+    # (16 Oct, a Mac: an older staged venv left by a past self-update was offered as an update
+    # and applied, a downgrade; going back is `update rollback --app`, never an update)
     staged = sorted((v for v, info in st["versions"].items()
                      if info.get("state") == "staged" and v not in bad and is_version(v)
-                     and v != st["current"] and parse_version(v) != parse_version(__version__)),
+                     and v != st["current"] and parse_version(v) > parse_version(__version__)),
                     key=parse_version, reverse=True)
     last_check = read_json(last_check_path(state_dir))
     settings = load_settings(state_dir)

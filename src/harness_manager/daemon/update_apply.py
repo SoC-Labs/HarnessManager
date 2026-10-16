@@ -399,6 +399,15 @@ class Applier:
                                hint="stage one first: POST /api/v1/update/app "
                                     '{"stage_only": true}, or `harness-manager update app '
                                     "--apply`")
+        from harness_manager.services.update.version import is_version as _is_version
+        from harness_manager.services.update.version import parse_version as _parse
+
+        if _is_version(target) and _is_version(__version__) and _parse(target) < _parse(__version__):
+            # 16 Oct: an older staged venv was applied over 1.2.0 (a downgrade by "update")
+            raise RefusedError(f"harness-manager {target} is older than the one that runs "
+                               f"({__version__}): an update never goes back",
+                               hint="`harness-manager update rollback --app` goes back to the "
+                                    "previous version on purpose")
         from harness_manager.services.update.appstage import bad_reason
 
         mark = bad_reason(svc.state, target, app=app) if hasattr(svc, "state") else app.bad(target)

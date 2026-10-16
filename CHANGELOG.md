@@ -77,6 +77,10 @@ boards behave as before.
   image over Ethernet and no longer asks for the Debug USB or rewrites the config SD.
 
 ### Fixes
+- **An older version is never offered as an update.** A version left on disk by an earlier
+  self-update could be offered as "Restart to update" and applied over a newer install (a
+  downgrade). Only newer versions are offered now, and an apply refuses an older one; going
+  back stays `harness-manager update rollback --app`.
 - **macOS: upgrading over a running older background service.** A Mac changes its own name
   (`X` / `X.local`) with the network, and Harness Manager then took its own background service
   and locks for another machine's: `daemon stop` said "not here" and a stale lock was never
