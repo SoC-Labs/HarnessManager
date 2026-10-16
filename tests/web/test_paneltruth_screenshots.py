@@ -108,5 +108,5 @@ def test_review_bare_metal_rebuilt(page_factory, daemon, engine, psim, review, s
         path=str(review / f"panel-card-bare-metal-{scheme}.png"))
     details(page)
     expect(card(page).locator('[data-testid="panel-rebuilt"]')).to_contain_text(
-        "bare-metal release", timeout=T)
+        "bare-metal harness image", timeout=T)
     shoot(page, review, f"panel-bare-metal-rebuilt-{scheme}")
