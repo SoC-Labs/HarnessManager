@@ -87,7 +87,7 @@ jobs:
       - name: Tests (unit, integration, web UI, packaging, installer)
         run: |
           set -o pipefail
-          python -m pytest -q -rs | tee pytest.log
+          python -m pytest -q -rsfE | tee pytest.log
       - name: The browser, packaging and installer tests ran (no skips)
         run: |
           if grep -E "^SKIPPED .*(playwright|Chrome|chrome|package index|'build' package|uv is not|curl)" pytest.log; then
@@ -116,7 +116,7 @@ jobs:
           python -m pip install vendor/mps3_pyverify-*.whl
           python -m pip install --find-links vendor -e ".[dev]"
       - name: Unit tests
-        run: python -m pytest -q -rs tests/unit
+        run: python -m pytest -q -rsfE tests/unit
       - name: Installer smoke (scripts/install.sh)
         if: runner.os != 'Windows'
         run: scripts/smoke_install.sh --no-uv
