@@ -41,12 +41,14 @@ posix_only = pytest.mark.skipif(os.name != "posix", reason="a /bin/sh shim stand
 
 
 def free_pair() -> int:
-    """A base port whose next port is free too (the relay and hw_server pair)."""
-    for _ in range(200):
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            base = s.getsockname()[1]
-        if base < 65000 and not X.port_in_use(base + 1):
+    """A base port whose next port is free too (the relay and hw_server pair). Drawn from below
+    every OS's ephemeral range (Linux 32768+, macOS/Windows 49152+): a port taken from the
+    kernel (bind to 0) and released is soon handed to the next outgoing connection, so the
+    neighbour was free at the check and in use at the bind (macOS CI: EADDRINUSE)."""
+    import random
+    for _ in range(400):
+        base = random.randrange(24000, 32000)
+        if not X.port_in_use(base) and not X.port_in_use(base + 1):
             return base
     raise AssertionError("no free port pair")
 
