@@ -54,6 +54,7 @@ from harness_manager.core.errors import (
     UnavailableError,
 )
 from harness_manager.core.events import Event, EventBus
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.model import BoardIdentity, Check
 from harness_manager.core.pack import TAKES_DETAIL, BackupRecord, PreflightItem
 from harness_manager.core.session import pid_alive
@@ -471,7 +472,7 @@ class HarnessInstaller:
         if not j:
             return journal
         pid, host = int(j.get("pid", -1)), j.get("host", socket.gethostname())
-        if host == socket.gethostname() and pid != os.getpid() and pid_alive(pid):
+        if is_this_host(host) and pid != os.getpid() and pid_alive(pid):
             raise HeldError(f"a harness update of {board_id} is in progress (pid {pid})",
                             hint="wait for it to finish; never start a second one")
         phase = j.get("phase", "")

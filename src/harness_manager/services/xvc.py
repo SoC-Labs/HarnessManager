@@ -102,6 +102,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.events import Event, EventBus
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.pack import BoardSession
 from harness_manager.services.claim import lock_error, lock_refusal
 from harness_manager.services.lease import elsewhere_text
@@ -1568,7 +1569,7 @@ class XvcService:
             return
         owner = rec.get("owner") or {}
         pid = int(owner.get("pid") or 0)
-        if owner.get("host") and owner.get("host") != socket.gethostname():
+        if owner.get("host") and not is_this_host(owner.get("host")):
             self._drop_record(board_id)
             return
         if pid and pid != os.getpid() and _pid_alive(pid):

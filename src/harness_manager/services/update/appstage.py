@@ -38,6 +38,7 @@ from typing import Any
 
 from harness_manager.core.errors import HeldError, RefusedError
 from harness_manager.core.events import Event
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.session import pid_alive
 
 from .channel import VerifiedChannel
@@ -256,7 +257,7 @@ class StageLock:
             except FileExistsError:
                 info = self.holder() or {}
                 pid, host = int(info.get("pid", -1) or -1), info.get("host", "")
-                if host == socket.gethostname() and pid > 0 and not pid_alive(pid):
+                if is_this_host(host) and pid > 0 and not pid_alive(pid):
                     with contextlib.suppress(FileNotFoundError):
                         self.path.unlink()         # a dead stager: take it over
                     continue

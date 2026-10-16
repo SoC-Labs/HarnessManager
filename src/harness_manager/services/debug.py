@@ -137,6 +137,7 @@ from harness_manager.core.errors import (
     UnreachableError,
 )
 from harness_manager.core.events import Event, EventBus
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.pack import BoardSession, DebugAdapter
 from harness_manager.core.services import DebugStatus
 from harness_manager.services import openocd_probe
@@ -771,7 +772,7 @@ class DebugService:
         """``ours | held | starting | orphan | stale | reused | exited | elsewhere | ports-gone``."""
         owner = rec.get("owner") or {}
         pid = int(rec.get("pid") or 0)
-        if owner.get("host") and owner.get("host") != socket.gethostname():
+        if owner.get("host") and not is_this_host(owner.get("host")):
             return "elsewhere"
         live = self._live_get(board_id)
         if live is not None and live.proc.pid == pid:

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import ActionFailedError, HeldError
+from .hostid import is_this_host, same_host
 
 
 def default_lock_dir() -> Path:
@@ -170,7 +171,7 @@ class SessionLock:
                 return time.time() - self.path.stat().st_mtime > TORN_LOCK_GRACE_S
             except FileNotFoundError:
                 return True
-        return owner.host == socket.gethostname() and not _pid_alive(owner.pid)
+        return is_this_host(owner.host) and not _pid_alive(owner.pid)
 
     def acquire(self) -> None:
         try:
@@ -191,7 +192,7 @@ class SessionLock:
                 owner = self.owner()
                 if owner is None:
                     continue  # vanished between open and read: retry once
-                if owner.pid == me.pid and owner.host == me.host:
+                if owner.pid == me.pid and same_host(owner.host, me.host):
                     self._held = True
                     return
                 if self._is_stale(owner):
@@ -218,7 +219,7 @@ class SessionLock:
         if not self._held:
             return
         owner = self.owner()
-        if owner is not None and owner.pid == os.getpid() and owner.host == socket.gethostname():
+        if owner is not None and owner.pid == os.getpid() and is_this_host(owner.host):
             self.path.unlink(missing_ok=True)
         self._held = False
 

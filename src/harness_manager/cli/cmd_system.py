@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import signal
-import socket
 import time
 
 from harness_manager import __version__, naming
@@ -17,6 +16,7 @@ from harness_manager.core.errors import (
     HeldError,
     UnreachableError,
 )
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.pack import ProbeHints
 from harness_manager.core.session import LockOwner
 
@@ -241,7 +241,7 @@ def cmd_detach(ctx: Ctx) -> int:
     owner = ctx.owner(cand.board_id)
     if owner is None:
         raise AlreadyError(f"{cand.board_id} is not attached", hint="nothing to release")
-    if owner.pid == os.getpid() and owner.host == socket.gethostname():
+    if owner.pid == os.getpid() and is_this_host(owner.host):
         raise AlreadyError("this process holds the lock itself", hint="nothing to release")
     if is_my_hold(owner):
         try:

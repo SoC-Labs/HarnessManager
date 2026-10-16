@@ -47,7 +47,6 @@ import contextlib
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -66,6 +65,7 @@ from harness_manager.core.errors import (
     RefusedError,
     UnavailableError,
 )
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.session import SessionLock, pid_alive
 
 from .schema import CATALOG_APP, AppRelease
@@ -122,7 +122,7 @@ class LocalBusyProbe:
                 owner = SessionLock(path.stem, lock_dir=locks).owner()
                 if owner is None:
                     continue
-                local = owner.host == socket.gethostname()
+                local = is_this_host(owner.host)
                 if owner.pid == os.getpid() and local:
                     out.append(f"this process holds {path.stem}")
                 elif not local or pid_alive(owner.pid):

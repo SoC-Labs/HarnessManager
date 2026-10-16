@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from harness_manager.core.errors import HeldError
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.session import SessionLock, pid_alive
 
 DAEMON_JSON = "daemon.json"
@@ -79,7 +80,7 @@ class DaemonInfo:
         return f"{self.base_url}/#token={self.token}"
 
     def on_this_host(self) -> bool:
-        return not self.hostname or self.hostname == socket.gethostname()
+        return not self.hostname or is_this_host(self.hostname)
 
     def alive(self) -> bool:
         return self.on_this_host() and pid_alive(self.pid)

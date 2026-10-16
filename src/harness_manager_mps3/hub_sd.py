@@ -76,6 +76,7 @@ from harness_manager.core.errors import (
     UnreachableError,
     UsageError,
 )
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.pack import BackupRecord, Progress, report_progress
 from harness_manager.core.proc import no_window
 
@@ -720,7 +721,7 @@ class InFlight:
             self.path.unlink()
 
     def owner_alive(self, data: dict[str, Any]) -> bool:
-        if data.get("host") != socket.gethostname():
+        if not is_this_host(data.get("host")):
             return self.now() - float(data.get("started_at", 0)) < STALE_MARKER_S
         pid = int(data.get("pid", -1))
         if pid == os.getpid():

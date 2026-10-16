@@ -73,6 +73,7 @@ from typing import Any, Protocol
 
 from harness_manager.core import sshcmd
 from harness_manager.core.errors import HarnessError, UnreachableError, UsageError
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.model import Candidate, Link, LinkKind
 from harness_manager.core.proc import no_window
 from harness_manager.transports import tcp_serial as _tcp_serial  # noqa: F401 - registers tcp://
@@ -514,7 +515,7 @@ def reap_orphans(directory: Path | None = None) -> list[int]:
             with contextlib.suppress(OSError):
                 path.unlink()
             continue
-        if host and host != socket.gethostname():
+        if host and not is_this_host(host):
             continue
         if owner == os.getpid() or pid_alive(owner):
             continue

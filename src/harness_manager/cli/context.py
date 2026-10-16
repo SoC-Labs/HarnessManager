@@ -15,7 +15,6 @@ import argparse
 import dataclasses
 import os
 import signal
-import socket
 import sys
 import threading
 import time
@@ -35,6 +34,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.events import Event
+from harness_manager.core.hostid import is_this_host
 from harness_manager.core.model import Candidate, Link, LinkKind
 from harness_manager.core.pack import BoardSession
 from harness_manager.core.session import LockOwner, SessionLock, default_lock_dir
@@ -68,7 +68,7 @@ def me_user() -> str:
 
 
 def is_mine(owner: LockOwner | None) -> bool:
-    return owner is not None and owner.host == socket.gethostname() and owner.user == me_user()
+    return owner is not None and is_this_host(owner.host) and owner.user == me_user()
 
 
 def is_my_hold(owner: LockOwner | None) -> bool:

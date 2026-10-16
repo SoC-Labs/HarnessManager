@@ -77,6 +77,10 @@ boards behave as before.
   image over Ethernet and no longer asks for the Debug USB or rewrites the config SD.
 
 ### Fixes
+- **macOS: upgrading over a running older background service.** A Mac changes its own name
+  (`X` / `X.local`) with the network, and Harness Manager then took its own background service
+  and locks for another machine's: `daemon stop` said "not here" and a stale lock was never
+  cleared. A name now matches with or without its domain.
 - **Saving a design to the card right after another save.** The card can refuse a save while
   it is still finishing the previous one. `card commit` now waits and tries once more; if the
   card is still busy, it and Keep on card say so (they used to say the design was too big).
