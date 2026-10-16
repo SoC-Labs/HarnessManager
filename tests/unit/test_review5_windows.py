@@ -42,6 +42,7 @@ def test_the_hub_runner_passes_no_window_on_windows(monkeypatch: pytest.MonkeyPa
         return subprocess.CompletedProcess(cmd, 0, "ok\n", "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("sys.platform", "linux")        # the twin: a POSIX host (not this runner)
     plain = hub.default_runner_factory("hub.invalid", "fpga")
     # FIX-PACK-1 5a (updated deliberately): pyverify's SshHubRunner under the per-hub
     # one-shot cap, a subclass whose call is pyverify's own; still not the windowless one.
@@ -134,6 +135,7 @@ def test_the_hub_sd_upload_and_the_hub_test_open_no_console_on_windows(
         return subprocess.CompletedProcess(cmd, 0, "", b"" if "text" not in kw else "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("sys.platform", "linux")        # the twin: a POSIX host (not this runner)
     bit = tmp_path / "x.bit"
     bit.write_bytes(b"\0")
     hub_sd.SshUploader("hub.invalid")(bit, "/srv/stage/x.bit")

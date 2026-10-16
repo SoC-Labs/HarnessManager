@@ -19,6 +19,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,8 @@ def readme(kits, tmp_path: Path) -> str:
 # --- item 4: the verdict line -------------------------------------------------------------------
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="runs the verdict grep under bash (the Windows runner's bash is the WSL stub)")
 def test_the_real_log_the_anchored_verdict_is_complete():
     text = REAL_LOG.read_text()
     marks = [m for m, _ in render.parse_markers(text) if m.startswith("HM_RM_BUILD_")]
@@ -128,7 +131,10 @@ def test_every_verdict_text_says_starts_with(kits, tmp_path, monkeypatch, capsys
 def test_the_guide_suggests_builds_under_home_as_the_user_guide(kits):
     g = kguide.guide(kits, static_id=kf.STATIC_ID, design="minimal", vivado=found())
     (action,) = g.steps[4].actions
-    assert "--out ~/builds/minimal" in action["text"]
+    # Windows shells do not expand "~": the guide then names the absolute path (builds_dir)
+    assert f"--out {kguide.builds_dir('minimal')}" in action["text"]
+    assert kguide.builds_dir("minimal", windows=False) == "~/builds/minimal"
+    assert str(Path.home() / "builds" / "minimal") == kguide.builds_dir("minimal", windows=True)
     assert "--out ~/builds/minimal" in (ROOT / "docs/USER_GUIDE.md").read_text()
     assert " --out build/" not in action["text"]                   # twin: the old, relative one
 

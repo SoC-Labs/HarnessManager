@@ -9,6 +9,7 @@ import os
 import stat
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -26,7 +27,7 @@ def mode(p) -> int:
 
 def test_config_dir_is_the_callers_state_dir_then_the_variable_then_home(tmp_path):
     assert config_dir(tmp_path / "svc", {"HARNESS_MANAGER_STATE_DIR": "/x"}) == tmp_path / "svc"
-    assert str(config_dir(None, {"HARNESS_MANAGER_STATE_DIR": "/x"})) == "/x"
+    assert config_dir(None, {"HARNESS_MANAGER_STATE_DIR": "/x"}) == Path("/x")
     assert config_dir(None, {}).parts[-2:] == (".config", "harness-manager")
 
 

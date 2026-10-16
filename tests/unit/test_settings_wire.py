@@ -754,10 +754,11 @@ def test_daemon_start_passes_log_level_and_pack_overrides_on():
 
     argv = service_argv(Path("/s"), None, None, log_level="debug",
                         pack_overrides={"mps3": {"console_pace_s": 0.0}})
-    assert argv == ["--state-dir", "/s", "--log-level", "debug", "--pack-overrides",
+    s = str(Path("/s"))                      # "\\s" on Windows
+    assert argv == ["--state-dir", s, "--log-level", "debug", "--pack-overrides",
                     '{"mps3": {"console_pace_s": 0.0}}']
     assert service_argv(Path("/s"), 0, "127.0.0.1", True) == [          # twin: nothing extra
-        "--state-dir", "/s", "--port", "0", "--listen", "127.0.0.1", "--demo"]
+        "--state-dir", s, "--port", "0", "--listen", "127.0.0.1", "--demo"]
 
 
 def test_the_cli_hands_both_flags_to_the_service(monkeypatch, capsys):

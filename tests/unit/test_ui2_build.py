@@ -6,6 +6,7 @@ the pin model (``floorplan``), "Run it your way" (``render.run_commands``), and 
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -138,7 +139,10 @@ def test_run_commands_batch_gui_and_an_open_session(tmp_path):
     assert out["batch"]["argv"][:3] == ["/opt/Xilinx/2024.1/bin/vivado", "-mode", "batch"]
     assert out["gui"]["argv"][1:3] == ["-mode", "gui"]
     assert out["gui"]["argv"][-2:] == ["-tclargs", "STOP_AFTER=link"]
-    assert f"'{d}/build_rm.tcl'" in out["gui"]["text"]             # quoted for the shell
+    if sys.platform == "win32":                       # Windows: double quotes, forward slashes
+        assert f'"{d.as_posix()}/build_rm.tcl"' in out["gui"]["text"]
+    else:
+        assert f"'{d}/build_rm.tcl'" in out["gui"]["text"]         # quoted for the shell
     # KIT-INTERACTIVE's line for an open Vivado (render.source_tcl, proven on 2026.1): one
     # source with `kit build` (tests/integration/test_kit_interactive_cli.py checks the CLI)
     assert out["session"]["text"] == render.source_tcl(d, stop_after="link")

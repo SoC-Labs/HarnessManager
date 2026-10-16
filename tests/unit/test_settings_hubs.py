@@ -254,7 +254,7 @@ def test_named_hub_file_ref_is_read_strictly(tmp_path):
     tok = tmp_path / "hub.token"
     tok.write_text("file-token\n")
     tok.chmod(0o600)
-    settings(f'[hubs.remote]\nurl = "https://hub.invalid:7246"\ntoken = "file:{tok}"\n')
+    settings(f'[hubs.remote]\nurl = "https://hub.invalid:7246"\ntoken = "file:{tok.as_posix()}"\n')
     assert _named_cred().header()["Authorization"] == "Bearer file-token"
 
 
@@ -263,7 +263,7 @@ def test_negative_twin_a_token_file_others_can_read_is_refused_for_a_named_hub(t
     tok = tmp_path / "hub.token"
     tok.write_text("file-token\n")
     tok.chmod(0o644)
-    settings(f'[hubs.remote]\nurl = "https://hub.invalid:7246"\ntoken = "file:{tok}"\n')
+    settings(f'[hubs.remote]\nurl = "https://hub.invalid:7246"\ntoken = "file:{tok.as_posix()}"\n')
     with pytest.raises(UsageError) as ei:
         _named_cred()
     assert "readable by others" in ei.value.message and "file-token" not in ei.value.message
@@ -493,13 +493,13 @@ def test_migration_moves_a_token_file_to_a_file_ref_and_a_second_board_reuses_th
     tok.write_text("t\n")
     tok.chmod(0o600)
     boards(f'[boards.a]\nmatch = ["10.0.0.1"]\n'
-           f'hub = {{ url = "https://hub.invalid:7246", target = "x", token_file = "{tok}" }}\n'
+           f'hub = {{ url = "https://hub.invalid:7246", target = "x", token_file = "{tok.as_posix()}" }}\n'
            f'[boards.b]\nmatch = ["10.0.0.2"]\n'
-           f'hub = {{ url = "https://hub.invalid:7246", target = "y", token_file = "{tok}" }}\n')
+           f'hub = {{ url = "https://hub.invalid:7246", target = "y", token_file = "{tok.as_posix()}" }}\n')
     a = H.adopt_inline_hub("a", H.load_resolver())
     b = H.adopt_inline_hub("b", H.load_resolver())
     assert a["created"] and b["reused"] and a["hub"] == b["hub"] == "hub"
-    assert f'token = "file:{tok}"' in (state() / "settings.toml").read_text()
+    assert f'token = "file:{tok.as_posix()}"' in (state() / "settings.toml").read_text()
     assert H.boards_using(H.load_resolver(), "hub") == ["a", "b"]
 
 

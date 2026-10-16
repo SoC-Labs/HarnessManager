@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -16,7 +17,8 @@ def _node(src: str, tz: str) -> str:
     # node by its full path: a runner may keep it outside /usr/bin (Homebrew, setup-node)
     node = shutil.which("node") or "node"
     return subprocess.run([node, "-e", src], capture_output=True, text=True, check=True,
-                          env={"TZ": tz, "PATH": "/usr/bin:/bin:/usr/local/bin"}).stdout.strip()
+                          env={"TZ": tz, "PATH": "/usr/bin:/bin:/usr/local/bin",
+                               **({"SYSTEMROOT": os.environ["SYSTEMROOT"]} if os.name == "nt" else {})}).stdout.strip()
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

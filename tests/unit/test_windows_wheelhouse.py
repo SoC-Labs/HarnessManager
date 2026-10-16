@@ -27,7 +27,7 @@ def test_the_pip_command_line_is_wheels_only_for_the_laptops_tags():
                             ["fakedep==1.0"], find_links=["vendor"])
     assert argv == ["py", "-m", "pip", "download", "--disable-pip-version-check", "--quiet",
                     "--no-deps", "--only-binary=:all:", "--platform", "win_amd64",
-                    "--python-version", "3.12", "--implementation", "cp", "--dest", "/out",
+                    "--python-version", "3.12", "--implementation", "cp", "--dest", str(Path("/out")),
                     "--find-links", "vendor", "fakedep==1.0"]
     mac = WC.download_argv("py", WC.target_of("macos-arm64"), "3.11", Path("/o"), ["x"],
                            no_index=True, index_url="https://mirror.example/simple")

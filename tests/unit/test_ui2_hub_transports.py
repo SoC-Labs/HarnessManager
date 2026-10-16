@@ -12,6 +12,7 @@ Each check has a negative twin.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -179,6 +180,7 @@ def test_our_own_newer_state_wins_over_an_older_overview(tmp_path):
     hub = SimpleNamespace(host=HUB, target="mps3_02_pl", client=c)
     svc.hub_overview("lab", hub, boards={"mps3_02_pl": ["b2"]})
     svc._board_for(hub, "b2")
+    time.sleep(0.05)              # Windows' monotonic clock ticks every ~16 ms: ours must be later
     svc._know(hub, "acquire", "me@mapstone-dev", "2026-10-01T13:00:00+00:00")
     assert svc.last_known("b2")["source"] == "acquire" and svc.last_known("b2")["state"] == "held"
     row = {t["target"]: t for t in svc.hub_overview("lab", hub)["targets"]}["mps3_02_pl"]

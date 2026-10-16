@@ -358,7 +358,7 @@ def test_the_guide_json_carries_the_newest_receipt_and_its_twin_has_none(kits, t
         {"gate": "rm_timing", "verdict": "FAIL", "detail": "setup WNS -0.412 ns"}])
     j = guide.guide(kits, static_id="0x72BB0A36", build_dir=bdir, vivado=found()).to_json()
     r = j["receipt"]
-    assert r["state"] == "failed" and r["path"].endswith("out/spike_rm_build.json")
+    assert r["state"] == "failed" and r["path"].replace("\\", "/").endswith("out/spike_rm_build.json")
     assert [(g["gate"], g["verdict"]) for g in r["gates"]] == [("static_id", "PASS"),
                                                                ("rm_timing", "FAIL")]
     assert guide.guide(kits, static_id="0x72BB0A36", vivado=found()).to_json()["receipt"] is None

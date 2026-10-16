@@ -368,7 +368,9 @@ def test_twin_scan_none_says_what_to_check():
     assert out["boards"] == [] and out["empty"]["text"] == "No MPS3 Debug USB found on this PC."
     assert any("cable" in c for c in out["empty"]["check"])
     assert any("power" in c for c in out["empty"]["check"])
-    assert any("mounted" in c for c in out["empty"]["check"])
+    # the hint for the PC's own OS: "mounted" (Linux), File Explorer / Device Manager (Windows)
+    word = "File Explorer" if sys.platform == "win32" else "mounted"
+    assert any(word in c for c in out["empty"]["check"])
 
 
 def test_scan_two_boards_pairs_no_ethernet_and_says_why():
@@ -528,7 +530,19 @@ def test_a_bundles_overlays_join_mps3_overlay_dirs_once(tmp_path, monkeypatch):
         again = bringup.add_overlay_dir(sctx, tmp_path / "b" / "overlays" / "open")
         assert again["added"] is False and again["dirs"] == first["dirs"]       # the twin
         toml = (tmp_path / "state" / "settings.toml").read_text()
-        assert "overlay_dirs" in toml and str(tmp_path / "b" / "overlays" / "open") in toml
+        from harness_manager.settings.policy import load_toml  # a Windows path is escaped
+
+        def strings(node):
+            if isinstance(node, str):
+                yield node
+            elif isinstance(node, dict):
+                for v in node.values():
+                    yield from strings(v)
+            elif isinstance(node, list):
+                for v in node:
+                    yield from strings(v)
+        assert "overlay_dirs" in toml
+        assert str(tmp_path / "b" / "overlays" / "open") in set(strings(load_toml(toml)))
     finally:
         eng.close_all()
 
