@@ -807,6 +807,14 @@ def _is_file(path: Path) -> bool:
         return False
 
 
+def _hw_server_in(directory: Path) -> str:
+    """``hw_server`` (``hw_server.exe`` on Windows) in ``directory``, or ""."""
+    for name in ("hw_server", "hw_server.exe"):
+        if _is_file(directory / name):
+            return str(directory / name)
+    return ""
+
+
 def find_hw_server(state_dir: Path | str | None = None) -> str:
     """The hw_server of the user's Vivado: the setting ``tools.hw_server``
     (``$HARNESS_MANAGER_HW_SERVER``, then the settings: lane SET-WIRE), else the one next to
@@ -828,11 +836,11 @@ def find_hw_server(state_dir: Path | str | None = None) -> str:
     vivado = shutil.which("vivado")
     if vivado:
         for d in dict.fromkeys((Path(vivado).parent, Path(vivado).resolve().parent)):
-            if _is_file(d / "hw_server"):
-                return str(d / "hw_server")
+            if (beside := _hw_server_in(d)):
+                return beside
     xil = os.environ.get("XILINX_VIVADO", "").strip()
-    if xil and _is_file(Path(xil) / "bin" / "hw_server"):
-        return str(Path(xil) / "bin" / "hw_server")
+    if xil and (beside := _hw_server_in(Path(xil) / "bin")):
+        return beside
     found = shutil.which("hw_server")
     if found:
         return found

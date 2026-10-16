@@ -499,17 +499,29 @@ def test_negative_twin_a_port_filter_that_does_not_admit_the_cable_never_opens_i
 def test_find_hw_server_prefers_the_env_then_the_one_beside_vivado(tmp_path, monkeypatch):
     viv = tmp_path / "Vivado" / "2024.1" / "bin"
     viv.mkdir(parents=True)
-    for name in ("vivado", "hw_server"):
+    win = sys.platform == "win32"          # Vivado ships vivado.bat and hw_server.exe there
+    for name in ("vivado.bat" if win else "vivado", "hw_server.exe" if win else "hw_server"):
         (viv / name).write_text("#!/bin/sh\n")
         (viv / name).chmod(0o755)
     monkeypatch.delenv(X.HW_SERVER_ENV, raising=False)
     monkeypatch.delenv("XILINX_VIVADO", raising=False)
     monkeypatch.setenv("PATH", str(viv))
-    assert X.find_hw_server() == str(viv / "hw_server")
+    assert X.find_hw_server() == str(viv / ("hw_server.exe" if win else "hw_server"))
     mine = tmp_path / "mine"
     mine.write_text("#!/bin/sh\n")
     monkeypatch.setenv(X.HW_SERVER_ENV, str(mine))
     assert X.find_hw_server() == str(mine)
+
+
+def test_find_hw_server_takes_the_exe_in_xilinx_vivado_bin(tmp_path, monkeypatch):
+    """Windows: $XILINX_VIVADO/bin holds hw_server.exe, not hw_server."""
+    bindir = tmp_path / "viv" / "bin"
+    bindir.mkdir(parents=True)
+    (bindir / "hw_server.exe").write_text("x")
+    monkeypatch.delenv(X.HW_SERVER_ENV, raising=False)
+    monkeypatch.setenv("XILINX_VIVADO", str(tmp_path / "viv"))
+    monkeypatch.setenv("PATH", str(tmp_path / "nothing"))
+    assert X.find_hw_server() == str(bindir / "hw_server.exe")
 
 
 def test_negative_twin_no_hw_server_is_unavailable_and_names_byo(tmp_path, monkeypatch):
