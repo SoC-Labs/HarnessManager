@@ -794,7 +794,7 @@ class Mps3Deploy:
             _check_shell_id(entry, live),
             _check_files(entry),
             PreflightItem(ITEM_PAIR, entry.pair_check, entry.pair_detail),
-            _check_clearing_fits(entry, live.clr_max),
+            _check_clearing_fits(entry, live.clr_max, impl=live.impl),
             transport_item,
             _check_usercode(entry, self.running_usercode),
         )
@@ -930,13 +930,17 @@ def _check_files(entry: CatalogueEntry) -> PreflightItem:
         f"partial {m.partial.len} B crc 0x{m.partial.crc32:08x}")
 
 
-def _check_clearing_fits(entry: CatalogueEntry, clr_max: int | None = None) -> PreflightItem:
+def _check_clearing_fits(entry: CatalogueEntry, clr_max: int | None = None, *,
+                         impl: str = "") -> PreflightItem:
     declared = entry.overlay.manifest.clearing.len
     path = entry.overlay.clearing_path()
     actual = path.stat().st_size if path.is_file() else 0
     size = max(declared, actual)
     if clr_max is not None:
         limit, source = clr_max, "the harness's clr_max"
+    elif impl == "linux":
+        # harnessd never reports clr_max; its arena is 1 MiB (v2.0/2.1) or 4 MiB (v2.2)
+        limit, source = constants.LINUX_CLEARING_ARENA_BYTES, "Linux harness's clearing arena"
     else:
         limit, source = CLEARING_ARENA_BYTES, "clearing arena"
     if size > limit:

@@ -33,6 +33,11 @@ LCD_MIRROR_PORT = 6940
 #: CLEARING_RAM_BYTES). A harness that reports ``clr_max`` (additive, in
 #: ``version`` or ``stats``) overrides it; Linux keeps clearings in DDR.
 CLEARING_ARENA_BYTES = 262144
+#: The Linux harness's clearing arena when it reports no ``clr_max``: harnessd's
+#: MPS3_SWAP_CLEARING_ARENA_BYTES is 1 MiB in v2.0/v2.1 and 4 MiB in v2.2 (mint 4), and it
+#: never reports ``clr_max``; 1 MiB is the floor of every Linux harness (16 Oct: rc4's
+#: nanosoc clearing is 263 048 B, over the bare-metal 256 KiB, so Program was refused).
+LINUX_CLEARING_ARENA_BYTES = 1024 * 1024
 
 CONSOLE_PORTS = {"uart0": UART0_PORT, "uart1": UART1_PORT, "swo": SWO_PORT}
 

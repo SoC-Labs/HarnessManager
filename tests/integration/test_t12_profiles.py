@@ -259,9 +259,11 @@ def overlays(tmp_path, monkeypatch):
                      static_usercode=FIELDED_USERCODE)
     make_overlay(root / "big", "bigclear", static_id=LINUX_HARNESSD.static_id,
                  clearing=b"\x00\x11\x22\x33" * 80_000)          # 320000 B > 262144
+    make_overlay(root / "huge", "hugeclear", static_id=LINUX_HARNESSD.static_id,
+                 clearing=b"\x00\x11\x22\x33" * 300_000)         # 1200000 B > 1 MiB
     make_overlay(root / "fielded", "synth_fielded", static_usercode=FIELDED_USERCODE)
     use_overlay_dirs(monkeypatch, root / LINUX_HARNESSD.name, root / FIELDED_ILA_V011.name,
-                     root / "big", root / "fielded")
+                     root / "big", root / "huge", root / "fielded")
     return root
 
 
@@ -325,11 +327,22 @@ def test_clr_max_from_stats_when_pyverify_can_send_stats(tmp_path, monkeypatch, 
     assert items[ITEM_CLEARING_FITS].check == Check.OK
 
 
-def test_negative_twin_without_clr_max_the_arena_default_refuses(tmp_path, monkeypatch, overlays):
+def test_without_clr_max_a_linux_harness_holds_a_clearing_over_256_kib(tmp_path, monkeypatch,
+                                                                       overlays):
+    # 16 Oct: harnessd never reports clr_max; its arena is 1 MiB (v2.0/2.1) or 4 MiB (v2.2).
+    # rc4's nanosoc clearing (263 048 B) was refused against the bare-metal 256 KiB.
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
         _, _, items = deploy_synth(vb, monkeypatch, "bigclear")
+    assert items[ITEM_CLEARING_FITS].check == Check.OK
+    assert "1048576 B Linux harness's clearing arena" in items[ITEM_CLEARING_FITS].detail
+
+
+def test_negative_twin_without_clr_max_a_linux_clearing_over_1_mib_is_refused(
+        tmp_path, monkeypatch, overlays):
+    with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
+        _, _, items = deploy_synth(vb, monkeypatch, "hugeclear")
     assert items[ITEM_CLEARING_FITS].check == Check.MISMATCH
-    assert "262144 B clearing arena" in items[ITEM_CLEARING_FITS].detail
+    assert "1048576 B Linux harness's clearing arena" in items[ITEM_CLEARING_FITS].detail
 
 
 def test_a_fabric_mismatch_refusal_is_incompatible_and_loads_nothing(tmp_path, monkeypatch,

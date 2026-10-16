@@ -10,6 +10,8 @@ Support for boards that run a mint-4 release (v2.2 and later), and a round of fi
 words from workshop preparation. Features marked "mint-4" appear only on those boards; other
 boards behave as before.
 
+**Platforms:** Linux and macOS. Windows is a **preview** in 1.2.0, not supported yet: `scripts/install.ps1` and the unit tests run on Windows, but the app, consoles and board access have not been signed off there.
+
 ### Linux boards
 - Linux boards: the DUT clock can be set (25/50/100 MHz presets) and is read back from the board.
 
@@ -75,6 +77,10 @@ boards behave as before.
 - **Upgrading from 2.1.0 to 2.2.0.** Write the 2.2.0 config SD and REBOOT; the board then runs
   the new fabric under its old Linux. **Board > Versions > Install** now pushes only the OS
   image over Ethernet and no longer asks for the Debug USB or rewrites the config SD.
+- **Programming a large design on a Linux board.** A Linux harness does not report its
+  clearing limit, and Harness Manager assumed the bare-metal 256 KiB, so on harness 2.2.0 it
+  refused nanosoc, nanosoc_ila, nanosoc_motor and nanosoc_multicore. A Linux harness now
+  counts as 1 MiB (it holds 1 MiB on 2.0/2.1 and 4 MiB on 2.2).
 
 ### Fixes
 - **An older version is never offered as an update.** A version left on disk by an earlier
