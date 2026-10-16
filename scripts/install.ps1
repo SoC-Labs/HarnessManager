@@ -173,7 +173,7 @@ function Invoke-Native {
 }
 
 # The install did not finish: say what to try, for an offline install and an online one.
-function Fail-Install([string]$Why) {
+function Stop-Install([string]$Why) {
     Write-Host "install.ps1: error: the install did not finish ($Why; the tool's message is above)." -ForegroundColor Red
     if ($Offline) {
         Write-Host "  -Offline: $Offline lacks a wheel this needs. Make the wheelhouse for this"
@@ -520,9 +520,16 @@ try {
             if ($r.Code -ne 0) { Fail "uv could not make a venv with Python >= $MinPy" }
         } else {
             if (-not $base) {
-                Fail ("Harness Manager needs Python $MinPy or newer, and none was found. " +
-                      "Install one from python.org (tick 'Add python.exe to PATH') or with " +
-                      "'winget install Python.Python.3.12', or install uv, or name it with -Python.")
+                $hint = "Harness Manager needs Python $MinPy or newer, and none was found.`n" +
+                        "  Install Python from python.org (in PowerShell):`n" +
+                        "    Invoke-WebRequest https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe -OutFile `$env:TEMP\py312.exe`n" +
+                        "    Start-Process `$env:TEMP\py312.exe -ArgumentList '/quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1' -Wait`n"
+                if (Get-Command winget -ErrorAction SilentlyContinue) {
+                    $hint += "  or with winget: winget install Python.Python.3.12`n"
+                }
+                $hint += "  Then open a NEW PowerShell window and run this installer again.`n" +
+                         "  (Or install uv, or name a Python with -Python.)"
+                Fail $hint
             }
             $r = Invoke-Native $base @('-m', 'venv', $Venv)
             if ($r.Code -ne 0) { Fail "$base could not make a venv" }
@@ -547,7 +554,7 @@ try {
         # --upgrade-package, not --upgrade: an upgrade of everything could swap the vendored
         # pyverify for a same-named package from the index.
         $r = Invoke-Native $uv ($pipBase + $indexArgs + @('--upgrade-package', 'harness-manager', '--reinstall-package', 'harness-manager') + $findLinks + $constraintArgs + @($spec))
-        if ($r.Code -ne 0) { Fail-Install "uv exited $($r.Code)" }
+        if ($r.Code -ne 0) { Stop-Install "uv exited $($r.Code)" }
     } else {
         $pipBase = @('-m', 'pip', '--disable-pip-version-check', 'install', '--quiet')
         $r = Invoke-Native $VenvPy @('-m', 'pip', '--version') -Capture
@@ -559,7 +566,7 @@ try {
         $r = Invoke-Native $VenvPy ($pipBase + @('--force-reinstall', '--no-deps', $pyverifyWheel))
         if ($r.Code -ne 0) { Fail "could not install $pyverifyWheel" }
         $r = Invoke-Native $VenvPy ($pipBase + @('--upgrade') + $indexArgs + $findLinks + $constraintArgs + @($spec))
-        if ($r.Code -ne 0) { Fail-Install "pip exited $($r.Code)" }
+        if ($r.Code -ne 0) { Stop-Install "pip exited $($r.Code)" }
         if ($pkg -like '*.whl') {
             # pip leaves a wheel of the same version alone; the file may still be newer.
             $r = Invoke-Native $VenvPy ($pipBase + @('--force-reinstall', '--no-deps', $pkg))
