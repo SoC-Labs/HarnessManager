@@ -107,7 +107,16 @@ def test_needs_attention_shows_only_what_is_wrong_with_its_fix(page_factory, eng
 @pytest.mark.week_plan("consoles_api", sim=True)
 def test_the_consoles_card_opens_a_console_on_the_workbench(page_factory, daemon):
     page = page_factory(**APP)
-    open_board(page, BOARD_USB)
+    # The board opens on the Workbench and ITS console card opens uart0 once it has drawn (the
+    # Overview row reads that session). Leaving for the Overview before that draw means the
+    # session never opens, and the row is right to say so: wait for the Workbench's console first
+    # (on a slow runner the frame came after the tab switch: CI py3.10/3.11 failures).
+    rail(page, BOARD_USB).click()
+    page.locator('[data-action="open"]').click()
+    page.wait_for_selector('[data-testid="board-header"]', timeout=T)
+    page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    page.wait_for_selector('[data-testid="console-uart0"]', state="attached", timeout=3 * T)
+    nav.land(page)
     card = page.locator('[data-testid="tile-consoles"]')
     # UI v2 SHELL-2: the board opened on the Workbench, whose console card opened uart0: the row
     # reads that session (its last line), not "not open in this page"

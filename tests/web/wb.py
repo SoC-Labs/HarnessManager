@@ -16,10 +16,19 @@ def picker(page: Any) -> Any:
     return page.locator('[data-testid="design-picker"]')
 
 
+def settle(page: Any) -> None:
+    """Return once the page has drawn what was done to it (the store renders on a frame)."""
+    page.evaluate("() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
+
+
 def open_picker(page: Any) -> None:
     """Open the design list (idempotent)."""
     p = picker(page)
     p.wait_for(timeout=T)
+    # The page draws on animation frames: a click or Escape just made is not in the DOM until
+    # the next frame, and aria-expanded / the list we read now may be the state before it (on a
+    # slow runner that is the whole difference: the list closes under us after we saw it open).
+    settle(page)
     for attempt in range(3):
         # A list that is closing (Escape just pressed) still says aria-expanded=true for a
         # moment: reading that and not clicking left the list to close under us (CI flake).
@@ -27,7 +36,11 @@ def open_picker(page: Any) -> None:
             p.click()
         try:
             page.locator('[data-testid="design-list"]').wait_for(timeout=T if attempt == 2 else 2500)
-            return
+            settle(page)
+            if page.locator('[data-testid="design-list"]').count():
+                return
+            if attempt == 2:
+                raise AssertionError("the design list closed as it opened")
         except Exception:
             if attempt == 2:
                 raise
