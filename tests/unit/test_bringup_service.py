@@ -185,18 +185,20 @@ def test_a_folders_sha256_is_its_manifest_one_sha256sum_line_per_file_in_byte_or
     (root / "sd" / "MB" / "x.txt").write_bytes(b"x")
     (root / "B.txt").write_bytes(b"upper")              # "B" (0x42) sorts before "a" (0x61)
     (root / "a.txt").write_bytes(b"lower")
-    (root / "odd\\name").write_bytes(b"odd")           # escaped as sha256sum escapes it
+    odd = sys.platform != "win32"                       # a backslash cannot be in a Windows name
+    if odd:
+        (root / "odd\\name").write_bytes(b"odd")       # escaped as sha256sum escapes it
     manifest, sums, links = bringup.folder_manifest(root)
     assert manifest == b"".join([
         _hex(b"upper").encode() + b"  B.txt\n",
         _hex(b"lower").encode() + b"  a.txt\n",
-        b"\\" + _hex(b"odd").encode() + b"  odd\\\\name\n",
+        *([b"\\" + _hex(b"odd").encode() + b"  odd\\\\name\n"] if odd else []),
         _hex(b"x").encode() + b"  sd/MB/x.txt\n",           # "M" (0x4D) before "c" (0x63)
         _hex(b"cfg").encode() + b"  sd/config.txt\n"])
     assert sums["sd/config.txt"] == _hex(b"cfg") and links == []
     chk = bringup.check_bundle(root, tmp_path / "work")
     assert chk.sha256 == _hex(manifest) and chk.sha256_of == "manifest"
-    assert chk.manifest_files == 5
+    assert chk.manifest_files == (5 if odd else 4)
 
 
 @pytest.mark.skipif(sys.platform in ("win32", "darwin"),

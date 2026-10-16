@@ -446,7 +446,7 @@ def test_needs_privilege_ends_the_job_with_the_exact_commands(tmp_path: Path):
     assert out["privileged_command"] == (
         f"sudo umount /dev/sdc1 && sudo dd if={shlex.quote(str(src))} of=/dev/sdc bs=4M conv=fsync "
         f"status=progress")
-    assert out["verify_command"] == f"sudo cmp -n {n} {src} /dev/sdc && echo verified"
+    assert out["verify_command"] == f"sudo cmp -n {n} {shlex.quote(str(src))} /dev/sdc && echo verified"
     assert out["sha256"] == cw.file_sha256(src) and out["image"] == str(src)
     assert rig.devices["/dev/sdc"].read_bytes() == before and rig.access.unmounted == []
     done = rig.topics("cardwriter.done")[-1]

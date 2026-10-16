@@ -100,8 +100,10 @@ def fake_dcp(static_id: str | int = STATIC_ID, **xml: Any) -> bytes:
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
         info = zipfile.ZipInfo("dcp.xml", (2026, 9, 24, 0, 0, 0))
+        info.create_system = 3          # ZipInfo defaults to 0 on Windows: same bytes everywhere
         zf.writestr(info, dcp_xml(**xml))
         info = zipfile.ZipInfo("README.txt", (2026, 9, 24, 0, 0, 0))
+        info.create_system = 3
         zf.writestr(info, "FAKE: a Harness Manager test fixture, not a Vivado checkpoint.\n")
         zf.comment = b"\0\0\0\0"
     data = buf.getvalue()
