@@ -10,6 +10,7 @@ Same rig as test_linux_claim (pyverify FakeShell + a fake board ssh); identify c
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import Any
 
@@ -429,3 +430,26 @@ def test_twin_without_replace_a_changed_key_is_still_refused(rig_factory):
     with pytest.raises(CL.HostKeyChangedError):
         claim_it(rig, expect_host_key=FP_NEW)
     assert rig.shell.authorized_keys is None
+
+
+def test_a_replace_that_windows_refuses_while_the_target_is_open_is_retried(tmp_path, monkeypatch):
+    real = os.replace
+    calls: list[int] = []
+
+    def flaky(src, dst):
+        calls.append(1)
+        if len(calls) < 3:
+            raise PermissionError(13, "Access is denied")
+        real(src, dst)
+
+    monkeypatch.setattr(CL, "_WINDOWS", True)
+    monkeypatch.setattr(CL.os, "replace", flaky)
+    target = tmp_path / "known_hosts"
+    CL._atomic_write(target, "line\n")
+    assert target.read_text() == "line\n" and len(calls) == 3
+    # twin: on POSIX a PermissionError is real and is raised at once
+    calls.clear()
+    monkeypatch.setattr(CL, "_WINDOWS", False)
+    with pytest.raises(PermissionError):
+        CL._atomic_write(target, "again\n")
+    assert len(calls) == 1

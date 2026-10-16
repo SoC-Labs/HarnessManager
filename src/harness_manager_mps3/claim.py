@@ -467,7 +467,23 @@ def _atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
         fh.write(text)
         fh.flush()
         os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    _replace(tmp, path)
+
+
+_WINDOWS = os.name == "nt"
+
+
+def _replace(tmp: Path, path: Path) -> None:
+    """``os.replace``; on Windows it fails with PermissionError while another thread has the
+    target open (ssh_argv reading known_hosts as a second connect pins): retry briefly."""
+    for attempt in range(40):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if not _WINDOWS or attempt == 39:
+                raise
+            time.sleep(0.025)
 
 
 class ClaimRecords:
