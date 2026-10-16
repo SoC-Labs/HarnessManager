@@ -401,7 +401,7 @@ def test_linux_comes_up_in_rescue_and_the_os_step_offers_the_whole_card_image(de
     expect(by(page, "bu-os-why-reader")).to_contain_text("bringup.sd_flash")    # the switch is off
     expect(os_step.locator('[data-option="skip"] input')).to_be_enabled()
     expect(page.locator('[data-action="bu-next"]')).to_be_disabled()
-    expect(by(page, "bu-next-why")).to_contain_text("Rescue mode")
+    expect(by(page, "bu-next-why")).to_contain_text("in rescue mode")
     os_step.locator('[data-option="skip"] input').check()
     expect(os_step).to_have_attribute("data-state", "done")
     assert not page.errors, page.errors

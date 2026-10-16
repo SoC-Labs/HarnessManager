@@ -329,6 +329,7 @@ def test_negative_twin_a_restart_row_with_no_start_flag_names_none(page_factory,
     page = open_settings(page_factory, "advanced")
     page.locator('[data-action="show-dev"]').check()          # L11: the port rows are developer-only now
     page.locator('[data-testid="settings-nav"] [data-settings-section="debug"]').click()
+    page.locator('[data-action="show-more"]').last.click()   # and advanced: behind the developer group's "more"
     type_in(row(page, "debug.port_base"), "24000")
     note = by_id(page, "settings-restart")
     expect(note).to_contain_text("debug.port_base", timeout=T)

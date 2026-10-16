@@ -293,7 +293,7 @@ def test_close_defaults_to_restore_release_and_close_when_yours_and_loaded(show:
     expect(d.locator('[data-choice="restore"]')).to_contain_text("Loads greybox in place of nanosoc")
     expect(d.locator('[data-choice="release"]')).to_contain_text("Leaves nanosoc loaded")
     expect(by_id(page, "close-keep-what")).to_contain_text("nothing renews it while the board is closed")
-    expect(d.locator('[data-action="close_confirm"]')).to_have_text("Restore baseline, release and close")
+    expect(d.locator('[data-action="close_confirm"]')).to_have_text("Restore baseline, give back and close")
     expect(d.locator('[data-action="close_cancel"]')).to_be_focused()
     d.locator('[data-action="close_confirm"]').click()
     expect(page.locator('[data-action="open-take"]')).to_be_visible(timeout=30_000)   # the preview
@@ -350,7 +350,7 @@ def test_a_board_with_no_hub_closes_by_default_and_can_restore_first(show: Showc
     open_here(page, BOARD_LINUX)
     d = close_dialog(page)
     expect(d).to_have_attribute("data-default", "close")
-    expect(d.locator('[data-choice="close"]')).to_contain_text("This board has no hub lease")
+    expect(d.locator('[data-choice="close"]')).to_contain_text("This board has no lease")
     expect(d.locator('[data-choice="restoreclose"] input')).to_be_enabled()
     d.locator('[data-action="close_confirm"]').click()
     expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)

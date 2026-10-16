@@ -50,7 +50,7 @@ def test_a_key_changed_back_to_one_seen_before_is_a_plain_warning(page_factory, 
     line = page.locator('[data-testid="claim-hostkey"]')
     expect(line).to_contain_text("Host key changed back to one seen on 2026-09-24", timeout=T)
     expect(line).to_contain_text("/persist (the user microSD) mounting or not")
-    expect(line).to_contain_text("board claim --adopt, if you trust it")
+    expect(line).to_contain_text("Adopt this board below, if you trust it")
     expect(line).to_contain_text(CARD)
     assert "warn" in line.get_attribute("class") and "err" not in line.get_attribute("class")
     expect(page.locator('[data-action="access-claim"]')).to_have_count(0)     # nothing accepts it
