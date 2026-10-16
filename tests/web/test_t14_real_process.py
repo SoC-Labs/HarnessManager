@@ -87,7 +87,7 @@ def test_the_daemon_process_serves_the_ui_and_opens_a_board_added_by_address(
             page.route("**/api/v1/probe", only_explicit_probes)
             page.goto(f"{info.base_url}/#token={info.token}")
             expect(page.locator('[data-testid="daemon-line"]')).to_contain_text(
-                f"harness-manager-daemon {info.version}", timeout=T)
+                f"background service {info.version}", timeout=T)
             assert "token" not in page.url
             page.locator('button[aria-label="Add a board by address"]').click()
             page.locator('input[aria-label="Board address"]').fill(vb.shell_endpoint)

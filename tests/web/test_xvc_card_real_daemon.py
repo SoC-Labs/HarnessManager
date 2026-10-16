@@ -155,7 +155,7 @@ def test_negative_twin_real_daemon_a_harness_without_xvc_dbgbr_cannot_open(serve
     server, bid = served(FIELDED_3F1A560F, boot=None)
     page = page_on(server, bid)
     state_is(page, "down")
-    expect(by_id(page, "reason-xvc_open")).to_contain_text("Cannot: needs release")
+    expect(by_id(page, "reason-xvc_open")).to_contain_text("Cannot: needs a release")
     expect(by_id(page, "reason-xvc_open")).to_contain_text("xvc_dbgbr")
     button(page, "xvc_open").click(force=True)
     expect(by_id(page, "xvc-result")).to_contain_text("Nothing was run.")

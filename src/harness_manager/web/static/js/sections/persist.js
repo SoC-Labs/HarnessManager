@@ -113,7 +113,7 @@ export function PersistCard({ bid }) {
   const gate = canRemake(bid);
   const picked = list.find((m) => m.id === st.picked) || list[0];
   return html`<${Card} title="Card contents" icon="hard-drive" testid="persist-card"
-      sub="The board's keys, name and settings kept on its microSD. Making the card again wipes them, so save them to this PC first.">
+      sub="Keys, name and settings kept on the board's microSD; making the card again wipes them.">
     <${Drive} bid=${bid} panel="persist_backup" spec=${backupSpec(bid)} icon="download"
       variant=${list.length && st.recent ? "" : "primary"} gate=${{ holder: "Back up the card contents" }} />
     ${st.error ? html`<${Reason} level="warn" text=${st.error} />` : null}

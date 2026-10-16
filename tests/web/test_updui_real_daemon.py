@@ -2,7 +2,7 @@
 ``daemon/update_api.py`` and ``update_apply.Applier``, not a simulation.
 
 The daemon runs over ``DemoEngine`` boards with a real ``UpdateService`` whose app updater
-points at an install root in ``tmp_path``: the installer's venv registered, and 0.9.0 staged
+points at an install root in ``tmp_path``: the installer's venv registered, and 9.0.0 staged
 beside it (a pointer and a python file; nothing is built). The update source is never asked
 (the checker is not started under the test server, and no route here fetches a channel), the
 trust store is empty, and there is no key. The apply's three outside effects are recorders,
@@ -38,7 +38,7 @@ pytestmark = pytest.mark.browser
 T = 10_000
 APP = {"width": 1440, "height": 1000}
 TOKEN = "updui-real"
-NEW = "0.9.0"
+NEW = "9.0.0"
 DEV = "this is a developer install (pip install -e)"
 
 
