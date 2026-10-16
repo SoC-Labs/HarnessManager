@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 try:
     import tomllib
 except ModuleNotFoundError:  # Python 3.10
