@@ -167,8 +167,14 @@ def fake_minisign(directory: Path) -> Path:
     """An executable ``minisign`` that signs with HM's module (the real CLI is not installed)."""
     repo = Path(__file__).resolve().parents[2]
     path = directory / "minisign"
-    path.write_text(FAKE_MINISIGN.format(python=sys.executable,
-                                         paths=[str(repo / "src"), str(repo)]), encoding="utf-8")
+    text = FAKE_MINISIGN.format(python=sys.executable, paths=[str(repo / "src"), str(repo)])
+    if sys.platform == "win32":          # no shebang there: a .cmd that runs the script
+        script = directory / "minisign.py"
+        script.write_text(text, encoding="utf-8")
+        path = directory / "minisign.cmd"
+        path.write_text(f'@"{sys.executable}" "{script}" %*\r\n', encoding="utf-8")
+        return path
+    path.write_text(text, encoding="utf-8")
     path.chmod(0o755)
     return path
 

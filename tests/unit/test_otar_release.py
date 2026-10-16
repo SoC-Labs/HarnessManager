@@ -19,6 +19,7 @@ No network, no real key, no gh: the wheel, the lock and gh are fakes (tests/fake
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -264,7 +265,8 @@ def test_each_catalogue_keeps_its_own_channel_and_serial(tmp_path, repo, keys):
 
 def test_throwaway_key_round_trip_and_refusals(tmp_path):
     sk, pk = signer_mod.keygen_throwaway(tmp_path / "k")
-    assert oct(sk.stat().st_mode & 0o777) == "0o600"
+    if os.name == "posix":                   # NTFS has no POSIX modes
+        assert oct(sk.stat().st_mode & 0o777) == "0o600"
     s = signer_mod.PythonSigner(sk)
     assert s.public.id_hex == _pub(pk).id_hex
     f = tmp_path / "f.txt"

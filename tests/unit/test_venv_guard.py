@@ -21,6 +21,10 @@ from harness_manager.core.registry import preflight
 from harness_manager_mps3 import selfcheck
 from tools import venv_guard as vg
 
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="tools/venv_guard.py is the POSIX developer-venv guard "
+    "(venv/lib/pythonX.Y/site-packages, the Makefile); a Windows venv is Lib/site-packages")
+
 ROOT = Path(__file__).resolve().parents[2]
 
 

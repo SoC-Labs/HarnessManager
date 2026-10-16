@@ -227,7 +227,8 @@ def test_install_sh_installs_icons_and_the_mac_bundle_and_removes_them():
     assert "mac_app_entry" in sh and "remove_mac_app" in sh and "Harness Manager.app" in sh
     uninstall = sh.split("if [[ $uninstall -eq 1 ]]", 1)[1].split("exit 0", 1)[0]
     assert "remove_desktop_entry" in uninstall and "remove_mac_app" in uninstall
-    subprocess.run(["bash", "-n", str(ROOT / "scripts" / "install.sh")], check=True)
+    if sys.platform != "win32":      # the Windows runner's bash is the WSL stub: no POSIX shell
+        subprocess.run(["bash", "-n", str(ROOT / "scripts" / "install.sh")], check=True)
 
 
 def test_install_ps1_stamps_the_shortcut_with_icon_and_id():

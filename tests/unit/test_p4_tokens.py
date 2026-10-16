@@ -203,7 +203,7 @@ def test_a_windows_checkout_with_crlf_line_ends_is_fresh(tree):
     for rel in (G.TOKENS, G.PANEL_TOKENS, G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT, G.GLYPHS_OUT,
                 G.APP_CSS, G.INDEX_HTML):
         p = tree / rel
-        p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
+        p.write_bytes(p.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))   # a checkout may be CRLF already
     assert G.check(tree) == []
     assert G.sha256_of((tree / G.TOKENS).read_bytes()) == G.sha256_of((REPO / G.TOKENS).read_bytes())
 

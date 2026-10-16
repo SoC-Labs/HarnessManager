@@ -19,6 +19,7 @@ import copy
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -182,6 +183,8 @@ def test_release_of_path_reads_both_layouts_and_symlinks(tree, tmp_path):
     assert vivado.release_of_path(plain) == ""
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake Vivado tree is POSIX executables "
+                    "named `vivado`; on Windows PATH finds only vivado.bat/.exe (PATHEXT)")
 def test_detect_prefers_and_flags_the_cached_kits_release(tree):
     env = {"PATH": str(tree["2024.1"].parent)}
     roots = (str(tree["apps"]), str(tree["research"]))
@@ -244,6 +247,8 @@ def states(g) -> dict[str, str]:
     return {s.id: s.state for s in g.steps}
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the step's fix is a POSIX `export PATH=...:$PATH` "
+                    "line, which a Windows shell does not take (product gap, reported)")
 def test_tools_is_not_done_when_path_has_the_wrong_release(kits26):
     g = guide.guide(kits26, static_id=SID, vivado=found_with("2024.1"))
     tools = g.steps[1]

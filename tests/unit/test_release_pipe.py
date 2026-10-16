@@ -9,6 +9,7 @@ under pytest's temp dir; nothing reaches the network, the hub or a device.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import zipfile
 from pathlib import Path
@@ -82,7 +83,8 @@ def test_a_linux_release_from_platform_artifacts_with_a_test_key(tmp_path, lx):
     assert set(comps["sd-HBI0309BC"]["files"]) == set(files)          # both listed, signed
     for r in "BC":
         assert files[f"MB/HBI0309{r}/Nanosoc/nanosoc.bit"] == lx.bit.read_bytes()
-        assert files[f"MB/HBI0309{r}/board.txt"].startswith(f"BOARD: HBI0309{r}\n".encode())
+        assert files[f"MB/HBI0309{r}/board.txt"].replace(b"\r\n", b"\n").startswith(
+            f"BOARD: HBI0309{r}\n".encode())     # (a Windows checkout of the template is CRLF)
     assert files["MB/HBI0309B/board.txt"].replace(b"HBI0309B", b"HBI0309C") == \
         files["MB/HBI0309C/board.txt"]
     assert files["config.txt"] == (lx.templates / "config.txt").read_bytes()
@@ -146,7 +148,8 @@ def test_a_test_key_is_never_pinned_and_lives_only_in_the_temp_dir(tmp_path):
     assert not [k.id_hex for k in trust.PINNED_KEYS if signer_mod.is_test_key(k.key)]
     sk, pk = signer_mod.keygen_test(tmp_path / "k")
     assert signer_mod.is_test_key(signer_mod.read_public_key(pk))
-    assert oct(sk.stat().st_mode & 0o777) == "0o600"
+    if os.name == "posix":                   # NTFS has no POSIX modes
+        assert oct(sk.stat().st_mode & 0o777) == "0o600"
     with pytest.raises(ReleaseError, match="temp dir only"):
         signer_mod.keygen_test(Path.home() / "hm-release-pipe-never-here")
     # a random (non-TEST) throwaway key is not taken for one

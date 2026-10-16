@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import tarfile
 from pathlib import Path
@@ -109,7 +110,8 @@ def test_backup_writes_archive_and_manifest(rig) -> None:
         "ssh/authorized_keys": 31, "identity": 14, "touch_cal": 32}
     on_disk = json.loads((folder / f"persist-{m['id']}.json").read_text())
     assert on_disk["sha256"] == m["sha256"] and on_disk["file_count"] == 3
-    assert (arc.stat().st_mode & 0o077) == 0           # keys: owner only
+    if os.name == "posix":                   # NTFS has no POSIX modes
+        assert (arc.stat().st_mode & 0o077) == 0           # keys: owner only
     assert rig.board.calls[0][2:] == ["tar", "-C", "/persist", "-czf", "-", "."]
     assert seen[0][0] == "backup" and seen[-1][1] == m["size"]
     assert not list(folder.glob("*.part"))

@@ -7,7 +7,9 @@ real device. Nothing here touches a block device.
 
 from __future__ import annotations
 
+import shlex
 import shutil
+import sys
 import threading
 from pathlib import Path
 
@@ -442,7 +444,7 @@ def test_needs_privilege_ends_the_job_with_the_exact_commands(tmp_path: Path):
     assert out["outcome"] == "needs_privilege" and out["verified"] is False
     n = src.stat().st_size
     assert out["privileged_command"] == (
-        f"sudo umount /dev/sdc1 && sudo dd if={src} of=/dev/sdc bs=4M conv=fsync "
+        f"sudo umount /dev/sdc1 && sudo dd if={shlex.quote(str(src))} of=/dev/sdc bs=4M conv=fsync "
         f"status=progress")
     assert out["verify_command"] == f"sudo cmp -n {n} {src} /dev/sdc && echo verified"
     assert out["sha256"] == cw.file_sha256(src) and out["image"] == str(src)
@@ -470,6 +472,7 @@ def test_the_macos_command_is_unmountdisk_and_the_raw_disk():
 # --- the seam ----------------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="needs the character device /dev/null")
 def test_real_access_refuses_a_regular_file_as_a_device(tmp_path: Path):
     f = tmp_path / "pretend-sdz"
     f.write_bytes(b"\0" * 4096)

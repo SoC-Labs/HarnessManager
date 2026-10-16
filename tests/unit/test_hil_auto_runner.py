@@ -8,6 +8,7 @@ The real CLI against the virtual boards is ``tests/integration/test_hil_auto_vir
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -499,6 +500,8 @@ def test_the_subprocess_invoker_passes_argv_and_exit_and_gives_no_stdin():
     assert out.rc == 3 and json.loads(out.stdout) == {"argv": ["--json", "info", B], "stdin": ""}
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the HIL runner stops a command by its "
+                    "POSIX process group (killpg, SIGKILL): it is a Linux-lab tool")
 def test_twin_a_command_that_outlives_its_timeout_is_stopped_and_has_no_exit():
     import sys
 
