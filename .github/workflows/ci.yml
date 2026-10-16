@@ -60,7 +60,10 @@ jobs:
   test:
     name: tests (ubuntu, Python ${{ matrix.python }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The whole suite (unit + integration + web UI in Chrome + packaging) takes ~45 min on a
+    # loaded 16-core box; 30 min cancelled 3.11 and 3.12 (run 38895085851). Not parallelised:
+    # many tests bind fixed ports and share per-user state, which pytest-xdist would race.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
