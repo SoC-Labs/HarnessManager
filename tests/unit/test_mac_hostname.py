@@ -31,7 +31,7 @@ def test_short_names_match_across_suffixes_and_case():
 
 
 def test_twin_different_machines_and_empty_names_do_not_match():
-    assert not same_host("srv03335", "srv03336.ecs.soton.ac.uk")
+    assert not same_host("lab-a", "lab-b.example.org")
     assert not same_host("", "") and not same_host(None, "X")
 
 

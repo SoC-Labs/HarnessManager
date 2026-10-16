@@ -1,7 +1,6 @@
 # Board lease (single-user mode) in Harness Manager — lane plan (Release 3, Mon 19 Oct)
 
-Plan of record: https://claude.ai/artifact/R3wnzGRK1BvxfqmNNXyKvt · cross-project lane table:
-/tmpdir/claude-74755/linux-lanes/RELEASE3_LANES.md · seam (frozen F0):
+Plan of record: the Release 3 lane plan (internal) · seam (frozen F0):
 `src/harness_manager/services/lease_backend.py`.
 
 ## What it is

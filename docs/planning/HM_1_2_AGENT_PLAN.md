@@ -5,13 +5,12 @@ Integration branch: `integ/v1.2` (worktree `../hm-integ-v12`). Every lane is a S
 in its own worktree `../hm-12-<lane>` on branch `team/12-<lane>`, cut from `integ/v1.2`.
 
 Inputs (all local, read-only for lanes):
-- v0.20 contract: `/tmpdir/claude-74755/linux-lanes/mint4b/s2b/docs/contracts/net-protocol.md`
+- v0.20 contract: the platform repo's `docs/contracts/net-protocol.md` (mint-4 branch)
   ("Mint 4 — hostio streams, sensors, mcc, cosim, hostio", from line ~2060; `usd` status
   `slot_mb`/`store_ver`).
 - pyverify + FakeShell `linux_mint4`: same checkout, `host/pyverify/` at lane/m4b-s2b 0554433d.
 - Card layout source of truth: `src/linux_soc/hw/fw_stage0/stage0_mkcard.py` `layout(store_mib)`
   on origin/integ/mint4-shapeA 2d000082 (platform repo).
-- Review page with evidence: https://claude.ai/artifact/2MdMipGqBFY8ofKiVSkCze
 
 ## Contract rules every lane follows
 
@@ -96,7 +95,7 @@ gate Wed evening, HIL Thu (bug flush). Board 2 is fielded Wed 14:00-16:00 withou
 
 ### W0-A VENDOR + FAKES (P0)
 Goal: integ/v1.2 builds and tests against pyverify v0.20.
-- Run `scripts/vendor_pyverify.sh /tmpdir/claude-74755/linux-lanes/mint4b/s2b 0554433d`.
+- Run `scripts/vendor_pyverify.sh <platform checkout> <sha>` against the mint-4 branch.
   Update the sha pin in `tests/unit/test_l5_release.py` and `vendor/README.md` provenance,
   marked "DEV ONLY: re-vendor from a tagged commit before 1.2.0".
 - `tests/fakes/virtual_board.py`: bring `LINUX_HARNESSD` to v2.1 (current features, real

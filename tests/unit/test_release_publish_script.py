@@ -9,7 +9,6 @@ uploaded (and the key is never pinned in a test, so the checks would refuse it a
 from __future__ import annotations
 
 import os
-import pty
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +18,10 @@ import pytest
 from tests.fakes.test_release_platform import linux_platform, release_args
 from tools.release import signer as signer_mod
 from tools.release.cli import main
+
+# The script is bash on a POSIX terminal; Windows has no pty/termios (CI windows-latest died
+# at collection on 1.1.0, so no Windows unit test ran): skip the module there.
+pty = pytest.importorskip("pty")
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "publish_harness_release.sh"
