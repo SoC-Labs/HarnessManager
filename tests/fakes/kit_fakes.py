@@ -153,10 +153,10 @@ def build_fixture(dest: Path, static_id: str = STATIC_ID, *, release: str = "202
     (dest / "static" / "static_routed_locked.dcp").write_bytes(
         fake_dcp(static_id, release=release))
     (dest / "static" / "static_stamp.json").write_text(
-        json.dumps(stamp(static_id, usercode), indent=2) + "\n", encoding="utf-8")
+        json.dumps(stamp(static_id, usercode), indent=2) + "\n", encoding="utf-8", newline="\n")
     doc = kit_doc(dest, static_id, release=release, usercode=usercode, frames=frames, **over)
     (dest / "kit.json").write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
-                                   encoding="utf-8")
+                                   encoding="utf-8", newline="\n")
     return dest
 
 

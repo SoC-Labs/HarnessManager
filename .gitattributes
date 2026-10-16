@@ -1,0 +1,6 @@
+# Byte-exact files: tests compare them with checksums and with bytes the code writes,
+# so the Windows checkout must not turn LF into CRLF.
+tests/fixtures/** -text
+tests/fakes/kit_fixture/** -text
+# Shell scripts run under bash: always LF.
+*.sh text eol=lf
