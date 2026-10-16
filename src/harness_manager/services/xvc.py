@@ -282,7 +282,8 @@ def probe(host: str, port: int, *, timeout: float = 3.0) -> dict[str, Any]:
         info = c.getinfo()
         state = "free" if info.startswith(GETINFO_REPLY_PREFIX) else (
             "locked" if lock_refusal(info) else "held")
-    except (XvcClosed, ConnectionResetError, BrokenPipeError, XvcProtocolError):
+    except (XvcClosed, ConnectionResetError, ConnectionAbortedError, BrokenPipeError,
+            XvcProtocolError):
         info, state = "", "held"             # accept-then-close: another client has the slot
     except OSError as exc:
         info, state = str(exc), "timeout"
@@ -545,7 +546,8 @@ class XvcRelay:
                     return self._locked(locked)
                 raise XvcProtocolError(f"unexpected getinfo reply {info!r}")
             up.settimeout(None)
-        except (XvcClosed, ConnectionResetError, BrokenPipeError, XvcProtocolError) as exc:
+        except (XvcClosed, ConnectionResetError, ConnectionAbortedError, BrokenPipeError,
+            XvcProtocolError) as exc:
             _close(up)
             why = self._refused_why(t0) if self._refused_why is not None else ""
             if why:                 # through ssh -L a refused far end also accepts, then closes

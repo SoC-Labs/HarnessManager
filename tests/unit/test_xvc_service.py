@@ -278,6 +278,26 @@ def test_the_relay_holds_the_boards_one_slot_while_open(fake):
     assert X.probe("127.0.0.1", fake.port)["state"] == "free"         # twin: after close
 
 
+@pytest.mark.parametrize("exc", [ConnectionResetError, ConnectionAbortedError])
+def test_a_slot_that_accepts_then_aborts_reads_as_held_not_unreachable(fake, monkeypatch, exc):
+    """Windows reports accept-then-close with unread data as WinError 10053 (aborted), not a
+    reset: both mean another client holds the slot."""
+    def boom(*a, **k):
+        raise exc("aborted by the peer")
+
+    monkeypatch.setattr(X, "read_reply", boom)
+    assert X.probe("127.0.0.1", fake.port)["state"] == "held"
+    relay = relay_for(fake)
+    try:
+        with pytest.raises(HeldError):
+            relay.acquire(0.3)
+    finally:
+        relay.close()
+    # twin: any other socket error is still not "held"
+    monkeypatch.setattr(X, "read_reply", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    assert X.probe("127.0.0.1", fake.port)["state"] == "timeout"
+
+
 def test_a_second_local_client_is_refused_and_the_first_is_undisturbed(fake):
     relay = relay_for(fake)
     try:
@@ -288,7 +308,11 @@ def test_a_second_local_client_is_refused_and_the_first_is_undisturbed(fake):
             with socket.create_connection(("127.0.0.1", relay.port), timeout=3) as b:
                 b.settimeout(3)
                 b.sendall(X.GETINFO)
-                assert b.recv(64) == b""                       # accept, then close
+                try:
+                    closed = b.recv(64) == b""                 # accept, then close
+                except (ConnectionResetError, ConnectionAbortedError):
+                    closed = True      # Windows resets (WinError 10053) a close with unread data
+                assert closed
             assert relay.refusals[-1][2] == "another client is attached"
             assert read_idcode(a) == IDCODE                    # A carries on
         wait_for(lambda: relay.served == 1, what="A to leave")
