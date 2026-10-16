@@ -45,6 +45,9 @@ SOCK = "0123456789abcdef0123456789abcdef01234567"      # what %C expands to (40 
 def mux(monkeypatch: pytest.MonkeyPatch) -> Any:
     """The service, with its socket directories under a short private temporary directory
     (never ~/.ssh, never the real runtime dir)."""
+    if sys.platform == "win32":
+        pytest.skip("ssh connection reuse (ControlMaster) is off on Windows by design "
+                    "(hub.mux_off_reason): there is no socket directory to test")
     base = Path(tempfile.mkdtemp(prefix="hmx", dir="/tmp"))
     monkeypatch.setenv(hubmod.HUB_SSH_MUX_DIR_ENV, str(base))
     monkeypatch.delenv(hubmod.HUB_SSH_MUX_ENV, raising=False)

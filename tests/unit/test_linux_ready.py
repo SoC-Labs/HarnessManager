@@ -17,6 +17,7 @@ import ast
 import importlib
 import json
 import socket
+import sys
 import threading
 from pathlib import Path
 
@@ -243,7 +244,10 @@ def server():
 
 
 def shell_at(port: int) -> Mps3Shell:
-    return Mps3Shell("127.0.0.1", port, timeout=1.0, probes=NO_PROBES)
+    # Windows takes ~2 s to refuse a connect to a closed local port (no instant RST): a 1 s
+    # timeout would turn "refused" into "silent"
+    return Mps3Shell("127.0.0.1", port, timeout=5.0 if sys.platform == "win32" else 1.0,
+                     probes=NO_PROBES)
 
 
 def ping(shell: Mps3Shell):

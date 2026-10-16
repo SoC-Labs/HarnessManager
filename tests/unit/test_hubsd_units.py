@@ -35,6 +35,8 @@ from harness_manager_mps3.hub_sd import (
     write_bit_backup,
 )
 
+pytestmark = pytest.mark.usefixtures("plain_ssh")
+
 T = "mps3_01_pl"
 OK_LINE = (f"program dispatched: board={T} method=sd plugin=sd_install ok=True "
            "part=xcku115-flvb1760-1-c sha256=0123456789ab dur=68.44s")

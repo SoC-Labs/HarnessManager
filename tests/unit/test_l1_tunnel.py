@@ -18,6 +18,8 @@ from harness_manager.core.model import Candidate, Link, LinkKind
 from harness_manager_mps3 import tunnel as T
 from tests.fakes.l1_fake_ssh import FakeSsh
 
+pytestmark = pytest.mark.usefixtures("plain_ssh")
+
 HUB = "mapstone-dev.ecs.soton.ac.uk"
 
 

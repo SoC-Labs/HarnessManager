@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,8 @@ from harness_manager_mps3 import tunnel as tunmod
 from harness_manager_mps3.constants import FABRIC_MISMATCH_ERRS
 from tests.fakes.l1_fake_ssh import FakeSsh
 from tests.fakes.lc_fake_board_ssh import FakeBoardSsh, make_key_line, write_key_pair
+
+pytestmark = pytest.mark.usefixtures("plain_ssh")
 
 HUB = "mapstone-dev.ecs.soton.ac.uk"
 BOARD_KEY = make_key_line("the-board")
@@ -119,6 +122,9 @@ def rig_factory(tmp_path, monkeypatch):
 
     def make(*, via: str = "", claimed: bool = False, impl: str = "linux",
              host_key: str = BOARD_KEY, mitm: str = "") -> Rig:
+        if via and sys.platform == "win32":
+            pytest.skip("the fake hub runs the hub's POSIX probe commands (sh -c ...) in a local "
+                        "subprocess; Windows argv quoting breaks them (the hub itself is Linux)")
         fp = CL.fingerprint(host_key.split()[1])
         shell = FakeShell("127.0.0.1", control_port=0, tftp_port=0, raw_tcp_port=0,
                           uart0_port=0, uart1_port=0, swo_port=0, identify_port=0,
@@ -194,7 +200,10 @@ def test_negative_twin_a_confirmed_claim_sends_the_key_and_pins_the_host_key(rig
     assert st["action"] == "claimed" and st["state"] == "mine"
     assert rig.shell.authorized_keys == rig.public.read_bytes() and rig.shell.ssh_claimed
     toml = boards_toml(rig.state.parent).read_text()
-    assert f'host_key = "{BOARD_KEY}"' in toml and f'key = "{rig.private}"' in toml
+    assert f'host_key = "{BOARD_KEY}"' in toml
+    from harness_manager.settings.policy import load_toml  # a Windows path is escaped in TOML
+    keys = [b["ssh"]["key"] for b in load_toml(toml)["boards"].values() if "ssh" in b]
+    assert [Path(k) for k in keys] == [rig.private]
 
 
 def test_a_claim_on_a_leased_board_is_for_the_lease_holder_only(rig_factory):

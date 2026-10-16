@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -60,7 +61,7 @@ def test_a_path_in_an_ssh_option_survives_ssh_splitting_it(path, plat, want):
 def test_the_system_config_is_programdatas_on_windows():
     assert str(sshcmd.system_config("win32", {"ProgramData": "C:\\ProgramData"})) in (
         "C:\\ProgramData/ssh/ssh_config", "C:\\ProgramData\\ssh\\ssh_config")
-    assert str(sshcmd.system_config("linux")) == "/etc/ssh/ssh_config"
+    assert sshcmd.system_config("linux") == Path("/etc/ssh/ssh_config")
 
 
 def test_the_pinned_board_ssh_on_windows_runs_ssh_exe_with_no_control_master(
@@ -78,7 +79,7 @@ def test_the_pinned_board_ssh_on_windows_runs_ssh_exe_with_no_control_master(
     assert "\\" not in o["UserKnownHostsFile"]
 
 
-def test_twin_the_pinned_board_ssh_on_linux_is_unchanged(rig_factory):  # noqa: F811
+def test_twin_the_pinned_board_ssh_on_linux_is_unchanged(rig_factory, plain_ssh):  # noqa: F811
     rig = rig_factory()
     claim_it(rig)
     assert rig.claim.ssh_argv(["true"])[0] == "ssh"
@@ -96,7 +97,7 @@ def test_a_tunnel_through_the_hub_on_windows_is_ssh_exe_with_proxyjump(on_window
     assert "ControlPersist" not in o and argv[-1] == "192.168.10.101"
 
 
-def test_twin_a_tunnel_off_windows_keeps_plain_ssh():
+def test_twin_a_tunnel_off_windows_keeps_plain_ssh(plain_ssh):
     t = T.SshTunnel("hub", [T.Forward("control", "127.0.0.1", 6900)], ssh_g=lambda argv: "",
                     restart=False)
     assert t.build_argv()[0] == "ssh"
@@ -107,7 +108,7 @@ def test_the_filtered_config_includes_the_system_config_by_a_path_ssh_can_read(t
     sysconf.parent.mkdir(parents=True)
     sysconf.write_text("Host *\n")
     text = T.filtered_config_text("Host hub\n    LocalForward 1 x:2\n", system_config=sysconf)
-    assert f'    Include "{sysconf}"' in text                       # quoted: it has a space
+    assert f'    Include {sshcmd.option_path(sysconf)}' in text                       # quoted: it has a space
     assert "# [harness-manager: forward removed]     LocalForward 1 x:2" in text
 
 

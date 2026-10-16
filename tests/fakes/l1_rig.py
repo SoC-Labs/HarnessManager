@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -75,6 +76,8 @@ def lab(vb: VirtualMps3, monkeypatch: pytest.MonkeyPatch, *, state_dir: Path,
     ssh = FakeSsh()
     ssh.route_board(BOARD_IP, board_routes(vb))
     hub = FakeHub(TARGET)
+    if not share_mcc and not hasattr(os, "openpty"):
+        pytest.skip("the lab rig's fake MCC is a pseudo-terminal (no os.openpty on Windows)")
     pty = None if share_mcc else PtyMcc(vb.mcc)      # a share broker would read it instead
     hub.add_tty(MCC_TTY, vb.mcc, share=share_mcc)
     tool = HubTool(hub, mcc=vb.mcc, pty=pty, tty=MCC_TTY)

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -100,3 +102,25 @@ def mps3_pack(vboard: VirtualMps3) -> Mps3Pack:
 
 def hil_enabled() -> bool:
     return os.environ.get("HARNESS_MANAGER_HIL") == "1"
+
+
+_REAL_PLATFORM = sys.platform
+
+
+@pytest.fixture
+def plain_ssh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On a real Windows host ``sshcmd.ssh_program()`` is the absolute path of ``ssh.exe``
+    (by design). A test that checks the rest of an argv, not the program, asks for plain
+    ``ssh`` here, as on POSIX. A test that fakes ``sys.platform`` gets the real logic."""
+    if _REAL_PLATFORM != "win32":
+        return
+    from harness_manager.core import sshcmd
+
+    real = sshcmd.ssh_program
+
+    def program(platform: str | None = None, **kw: Any) -> str:
+        if platform is None and sys.platform == _REAL_PLATFORM:
+            return "ssh"
+        return real(platform, **kw)
+
+    monkeypatch.setattr(sshcmd, "ssh_program", program)
