@@ -290,7 +290,10 @@ def test_close_defaults_to_restore_release_and_close_when_yours_and_loaded(show:
     expect(by_id(page, "close-title")).to_have_text("Close mps3-03")
     expect(d).to_have_attribute("data-default", "restore")
     expect(d.locator('[data-choice="restore"] input')).to_be_checked()
-    expect(d.locator('[data-choice="restore"]')).to_contain_text("Loads greybox in place of nanosoc")
+    # The baseline is named once the board's overlays have been read, else "the baseline"
+    # (lease.js baselineName); the dialog may open before that read (half the runs, 16 Oct).
+    expect(d.locator('[data-choice="restore"]')).to_contain_text(
+        re.compile(r"Loads (greybox|the baseline) in place of nanosoc"))
     expect(d.locator('[data-choice="release"]')).to_contain_text("Leaves nanosoc loaded")
     expect(by_id(page, "close-keep-what")).to_contain_text("nothing renews it while the board is closed")
     expect(d.locator('[data-action="close_confirm"]')).to_have_text("Restore baseline, give back and close")
