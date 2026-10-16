@@ -30,6 +30,14 @@ proc version {args} {
 }
 proc get_parts {args} { return [lindex $args end] }
 proc set_param {args} { }
+# no console in the embedded Tcl (Windows): `puts` to stdout/stderr fails with "bad file number"
+rename puts ::__real_puts
+proc puts {args} {
+    set a $args
+    if {[lindex $a 0] eq "-nonewline"} { set a [lrange $a 1 end] }
+    if {[llength $a] == 1 || [lindex $a 0] in {stdout stderr}} { return }
+    uplevel 1 ::__real_puts $args
+}
 """
 
 

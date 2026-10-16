@@ -102,8 +102,9 @@ def test_a_relative_generic_path_in_an_inline_design_is_refused(kits):
         make(kits, d)
     assert "relative" in e.value.message
     # twin: an absolute one is taken as it is
-    d["build"]["generics"] = {"IMG": {"path": "/abs/a.hex"}}
-    assert make(kits, d).params["RM_GENERIC_FILES"] == "/abs/a.hex"
+    absolute = Path("/abs/a.hex").resolve()          # "C:\\abs\\a.hex" on Windows: "/abs" is not absolute there
+    d["build"]["generics"] = {"IMG": {"path": str(absolute)}}
+    assert make(kits, d).params["RM_GENERIC_FILES"] == absolute.as_posix()
 
 
 # --- build.sources: HDL only --------------------------------------------------------------------
@@ -158,6 +159,14 @@ proc get_ports {args} { return {} }
 proc get_clocks {args} { return {} }
 proc close_project {args} { }
 set ::SARGS {}
+# no console in the embedded Tcl (Windows): `puts` to stdout/stderr fails with "bad file number"
+rename puts ::__real_puts
+proc puts {args} {
+    set a $args
+    if {[lindex $a 0] eq "-nonewline"} { set a [lrange $a 1 end] }
+    if {[llength $a] == 1 || [lindex $a 0] in {stdout stderr}} { return }
+    uplevel 1 ::__real_puts $args
+}
 """
 
 
