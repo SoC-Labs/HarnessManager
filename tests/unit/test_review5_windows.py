@@ -111,7 +111,10 @@ def test_no_settings_wire_test_writes_a_path_into_a_toml_basic_string() -> None:
 
     src = (Path(__file__).parent / "test_settings_wire.py").read_text(encoding="utf-8")
     assert not re.findall(r"""(?:= |\[|, )"\{[^}]*\}\"""", src)
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
 
     from tests.unit.test_settings_wire import lit
 

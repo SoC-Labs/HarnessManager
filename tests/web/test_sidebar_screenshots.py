@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_SPARE, BOARD_V011
 from tests.web.test_demo_all_browser import Showcase, T, by_id, make_showcase

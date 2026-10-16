@@ -440,7 +440,10 @@ def test_a_share_set_through_the_settings_is_listed_and_still_valid(tmp_path, sh
     assert (got.source, got.value) == ("user", "/dev/mps3_01_pl/tty_00")
     text = (tmp_path / "boards.toml").read_text()
     assert "# the lab board" in text
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
 
     table = tomllib.loads(text)["boards"]["lab"]["hub"]
     assert hub.parse_hub_table(table).shares == {"mcc": "/dev/mps3_01_pl/tty_00"}

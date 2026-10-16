@@ -257,7 +257,10 @@ def _boards(tmp_path, text: str):
 
 
 def test_a_table_keyed_by_the_old_board_id_moves_with_its_pinned_key(tmp_path):
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
 
     _boards(tmp_path, '[boards."mps3@192.168.10.101:6900"]\nname = "lab-07"\n'
                       'match = ["192.168.10.101", "spare"]\n'
@@ -275,7 +278,10 @@ def test_a_table_keyed_by_the_old_board_id_moves_with_its_pinned_key(tmp_path):
 
 
 def test_twin_a_table_found_by_match_keeps_its_key_and_gets_the_new_address(tmp_path):
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
 
     _boards(tmp_path, '[boards.lab]\nmatch = ["192.168.10.101:6900"]\n')
     what = IA.move_board_table("mps3@192.168.10.101:6900", "mps3@192.168.10.110:6900",

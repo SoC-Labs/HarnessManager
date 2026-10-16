@@ -18,7 +18,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 from harness_manager.settings.packs import with_packs
 from harness_manager.settings.resolve import core_schema
