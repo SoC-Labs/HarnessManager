@@ -77,6 +77,10 @@ boards behave as before.
 - **Upgrading from 2.1.0 to 2.2.0.** Write the 2.2.0 config SD and REBOOT; the board then runs
   the new fabric under its old Linux. **Board > Versions > Install** now pushes only the OS
   image over Ethernet and no longer asks for the Debug USB or rewrites the config SD.
+- **Command-line fixes.** `board keys TARGET list|add|remove` takes the board once (it asked
+  for it twice). `lease --help` no longer says a lease needs a hub. `board claim-status` says
+  when your key is on the board but someone else's key is its owner. `lease show` behind a
+  hub says "yours (this hub account)", since everyone on one hub account shares the lease.
 - **Programming a large design on a Linux board.** A Linux harness does not report its
   clearing limit, and Harness Manager assumed the bare-metal 256 KiB, so on harness 2.2.0 it
   refused nanosoc, nanosoc_ila, nanosoc_motor and nanosoc_multicore. A Linux harness now

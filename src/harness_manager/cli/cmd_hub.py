@@ -288,9 +288,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     vp = subparsers.add_parser(
         "lease", help="the board's lease (its hub's, or its own in single-user mode): show, "
                  "acquire, release, request, requests, respond, force, leave, dismiss, mode",
-        description="The hub lease that keeps two people off one shared board. It needs a hub "
-                    "(`harness-manager hub`), and nothing takes it for you: `acquire` here, or "
-                    "Take lease in the app. The Harness "
+        description="The lease that keeps two people off one shared board: the hub's lease "
+                    "(`harness-manager hub`), or, on a desk board in single-user mode, the "
+                    "board's own (`lease mode TARGET on`). Nothing takes it for you: `acquire` "
+                    "here, or Take lease in the app. The Harness "
                     "Manager service heartbeats it while the board is open there. `request` "
                     "asks the holder to give it up; with no answer in 2:00, `force` takes it.",
         parents=[fmt], epilog=_cols("lease"))
@@ -504,7 +505,8 @@ def _human_view(where: str, target: str, view: dict[str, Any], now: float) -> li
     lease = view["lease"]
     lines = [f"{where}: not leased"] if lease is None else [
         f"{where}: held by {lease['holder']} (user {lease.get('user') or '?'}, "
-        f"expires {lease.get('expires_at') or '?'})" + (" — yours" if lease["mine"] else "")]
+        f"expires {lease.get('expires_at') or '?'})" + (" — yours (this hub account; other sessions on it read the same)"
+                                                     if lease["mine"] else "")]
     if view["queue"]:
         lines.append("queue: " + "  ".join(
             f"{q.get('position', '?')}. {q.get('holder', '?')}" + (" (you)" if q.get("mine") else "")

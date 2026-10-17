@@ -260,8 +260,11 @@ def cmd_sd(ctx: Ctx) -> int:
 KEYS_TSV: tuple[str, ...] = ("BOARD_ID", "FINGERPRINT", "TYPE", "LABEL", "MINE", "ACTION")
 
 
-def add_keys_parser(sub, parents) -> None:
-    """Add ``keys`` (list, add, remove) to the ``board`` group's subparsers."""
+def add_keys_parser(sub, parents, action_parents=None) -> None:
+    """Add ``keys`` (list, add, remove) to the ``board`` group's subparsers. ``parents`` give
+    ``keys`` its TARGET and --via; the actions take only ``action_parents`` (the output format),
+    so TARGET is asked once: ``board keys TARGET list`` (16 Oct: it was asked twice)."""
+    action_parents = list(parents[:1] if action_parents is None else action_parents)
     TSV_COLUMNS.setdefault("board keys", KEYS_TSV)
     kp = sub.add_parser(
         "keys", help="who may log in to a claimed board: list, add or remove a public key "
@@ -272,10 +275,10 @@ def add_keys_parser(sub, parents) -> None:
         parents=list(parents), epilog=f"--tsv columns: {' '.join(KEYS_TSV)}")
     ks = kp.add_subparsers(dest="keys_cmd", required=True, metavar="ACTION")
     pa = ks.add_parser("list", help="the keys the board accepts, by fingerprint and label",
-                       parents=list(parents))
+                       parents=action_parents)
     pa.set_defaults(keys_cmd="list")
     ad = ks.add_parser("add", help="add a public key (asks first, shows its fingerprint)",
-                       parents=list(parents))
+                       parents=action_parents)
     ad.add_argument("--key", default=None, metavar="LINE",
                     help="the PUBLIC key line to add (ssh-ed25519 AAAA... comment)")
     ad.add_argument("--key-file", default=None, metavar="FILE",
@@ -284,7 +287,7 @@ def add_keys_parser(sub, parents) -> None:
                     help="who or what this key is (default: the key's own comment)")
     ad.add_argument("--yes", action="store_true", help="do not ask")
     rm = ks.add_parser("remove", help="remove a key by fingerprint (asks first; never this PC's "
-                                      "own key)", parents=list(parents))
+                                      "own key)", parents=action_parents)
     rm.add_argument("--fingerprint", required=True, metavar="SHA256:...",
                     help="the key to remove, as `board keys list` shows it")
     rm.add_argument("--yes", action="store_true", help="do not ask")

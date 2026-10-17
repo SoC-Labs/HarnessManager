@@ -164,6 +164,11 @@ def describe(st: dict[str, Any] | None) -> str:
     checked = "" if st.get("live") else f" [{st.get('source') or 'not checked'}, {st.get('checked_at')}]"
     if state == "mine":
         bits = [b for b in (claimed.get("key_fp"), claimed.get("by"), claimed.get("at")) if b]
+        first = st.get("claim_key")
+        if first and claimed.get("key_fp") and first != claimed.get("key_fp"):
+            # 16 Oct: your key is on the board, but the owner (its first key) is someone else's
+            return (f"your key is on the board ({', '.join(bits)}), but you are not its owner: "
+                    f"the owner is the first claimed key {first}{checked}")
         return f"claimed by you ({', '.join(bits)}){checked}"
     if state == "other":
         return f"claimed by another key (not this Harness Manager's){checked}"
