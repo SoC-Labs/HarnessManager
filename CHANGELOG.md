@@ -10,6 +10,9 @@ Support for boards that run a mint-4 release (v2.2 and later), and a round of fi
 words from workshop preparation. Features marked "mint-4" appear only on those boards; other
 boards behave as before.
 
+**Windows is not supported in 1.2.0**; it is planned for a later release. The release ships no
+Windows installer.
+
 **Platforms:** Linux and macOS. Windows is a **preview** in 1.2.0, not supported yet: `scripts/install.ps1` and the unit tests run on Windows, but the app, consoles and board access have not been signed off there.
 
 ### Linux boards

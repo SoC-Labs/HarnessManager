@@ -5,6 +5,9 @@ do, how to install from other sources, and how the release is packaged and teste
 
 ## What you need
 
+Harness Manager 1.2.0 is supported on Linux and macOS. Windows is not supported in 1.2.0;
+it is planned for a later release. The Windows notes below describe that work in progress.
+
 - Python 3.10 or newer, or [uv](https://docs.astral.sh/uv/). The installer takes the
   newest Python 3.10+ it finds (`--python` names one). With uv and no such Python, uv
   downloads one, with no root.
@@ -164,9 +167,9 @@ its own window. The shortcut and the running window share one taskbar button wit
 Harness Manager icon. `-NoStartMenu` leaves it out (and removes one an earlier run added);
 `-Uninstall` removes it.
 
-## Windows
+## Windows (planned; not supported in 1.2.0)
 
-What a Windows 10 or 11 laptop needs, besides the installer:
+What a Windows 10 or 11 laptop will need, besides the installer:
 
 | What | Why | How |
 |---|---|---|
