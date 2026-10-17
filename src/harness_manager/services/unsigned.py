@@ -14,7 +14,7 @@ The sha256 names what is written, so a person can check it on their own machine:
   file under it (found without following a symbolic link, as ``find -type f``; the path
   relative to the folder, ``/``-separated; a name with a backslash or a newline escaped as GNU
   ``sha256sum`` escapes it), sorted by the path's bytes (``LC_ALL=C sort``), which
-  ``MANIFEST_RECIPE`` prints too. A folder with a symbolic link is refused by its callers
+  ``MANIFEST_RECIPE`` prints too (``MANIFEST_RECIPE_MACOS`` on a Mac: the same digest). A folder with a symbolic link is refused by its callers
   (the sha256 would not cover what the link points to).
 
 ``require`` takes the phrase for the thing AS IT IS NOW (any spacing, the hex in either case)
@@ -39,6 +39,13 @@ ZIP_RECIPE = "sha256sum BUNDLE.zip"
 FILE_RECIPE = "sha256sum CARD.img"
 MANIFEST_RECIPE = ("cd FOLDER && find . -type f -printf '%P\\0' | LC_ALL=C sort -z | "
                    "xargs -0 sha256sum | sha256sum")
+#: The same three for macOS (BSD ``find`` has no ``-printf``; there is no ``sha256sum``, but
+#: ``shasum -a 256`` prints the same ``<hex>  <path>`` lines). ``find -print0`` keeps ``./`` on
+#: every path, so ``sed`` takes it off; the digest is exactly the Linux one.
+ZIP_RECIPE_MACOS = "shasum -a 256 BUNDLE.zip"
+FILE_RECIPE_MACOS = "shasum -a 256 CARD.img"
+MANIFEST_RECIPE_MACOS = ("cd FOLDER && find . -type f -print0 | LC_ALL=C sort -z | "
+                         "xargs -0 shasum -a 256 | sed 's|  \\./|  |' | shasum -a 256")
 #: What the refusal calls each kind of thing.
 NOUNS = {"zip": "bundle", "manifest": "bundle", "file": "card image"}
 
@@ -112,9 +119,15 @@ class Unsigned:
     def how(self) -> str:
         return {"zip": ZIP_RECIPE, "file": FILE_RECIPE}.get(self.of, MANIFEST_RECIPE)
 
+    @property
+    def how_macos(self) -> str:
+        return {"zip": ZIP_RECIPE_MACOS, "file": FILE_RECIPE_MACOS}.get(
+            self.of, MANIFEST_RECIPE_MACOS)
+
     def as_dict(self) -> dict[str, Any]:
         return {"phrase": self.phrase, "sha256": self.sha256, "of": self.of,
                 "files": self.files if self.of == "manifest" else None, "how": self.how,
+                "how_macos": self.how_macos,
                 "banner": BANNER, "path": self.path}
 
 

@@ -142,6 +142,8 @@ UNSIGNED_WORDS = _unsigned.WORDS
 UNSIGNED_BANNER = _unsigned.BANNER
 ZIP_RECIPE = _unsigned.ZIP_RECIPE
 MANIFEST_RECIPE = _unsigned.MANIFEST_RECIPE
+ZIP_RECIPE_MACOS = _unsigned.ZIP_RECIPE_MACOS
+MANIFEST_RECIPE_MACOS = _unsigned.MANIFEST_RECIPE_MACOS
 
 ProgressFn = Callable[[str, int, int], None]
 
@@ -1075,7 +1077,8 @@ def status(engine: Any, state_dir: Any = None) -> dict[str, Any]:
     return {"default_host": DEFAULT_HOST, "pc_hint": PC_ADDRESS_HINT, "platform": sys.platform,
             "usb_write_warning": USB_WRITE_WARNING, "unsigned": {
                 "banner": UNSIGNED_BANNER, "words": UNSIGNED_WORDS, "zip": ZIP_RECIPE,
-                "manifest": MANIFEST_RECIPE},
+                "manifest": MANIFEST_RECIPE, "zip_macos": ZIP_RECIPE_MACOS,
+                "manifest_macos": MANIFEST_RECIPE_MACOS},
             "sd_flash": sd_flash(state_dir),
             "rescue_network": {"available": False, "reason": RESCUE_NETWORK_REASON,
                                "note": RESCUE_NETWORK_NOTE},

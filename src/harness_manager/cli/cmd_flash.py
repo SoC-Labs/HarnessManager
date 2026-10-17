@@ -173,7 +173,7 @@ def _unsigned(ctx: Ctx, w: cw.CardWriter, plan: cw.WritePlan) -> None:
     info = w.unsigned_of(plan.source)
     ctx.note(unsigned.BANNER)
     of = {"zip": "the zip", "file": "the image"}.get(info.of, f"its manifest of {info.files} files")
-    ctx.note(f"sha256   {info.sha256}  ({of}: {info.how})")
+    ctx.note(f"sha256   {info.sha256}  ({of}: {info.how}; macOS: {info.how_macos})")
     if a.confirm_unsigned is not None:
         typed = a.confirm_unsigned
     elif a.yes:

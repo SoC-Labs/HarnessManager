@@ -201,17 +201,79 @@ def test_a_folders_sha256_is_its_manifest_one_sha256sum_line_per_file_in_byte_or
     assert chk.manifest_files == (5 if odd else 4)
 
 
-@pytest.mark.skipif(sys.platform in ("win32", "darwin"),
-                    reason="the recipe is GNU find (-printf) / sort / sha256sum: macOS has BSD find "
-                           "and no sha256sum (product issue, reported)")
-def test_the_manifest_recipe_prints_the_same_sha256(tmp_path):
+_POSIX = sys.platform == "win32"
+
+
+def _mac_path(tmp_path):
+    """A PATH that behaves like macOS for the recipes: BSD-style ``find`` (refuses ``-printf``),
+    ``shasum -a 256`` (python hashlib), and NO ``sha256sum``. The other tools are the box's."""
+    import shutil
+
+    d = tmp_path / "macbin"
+    d.mkdir()
+    for tool in ("sh", "bash", "sort", "xargs", "sed", "env", "cat", "dirname"):
+        found = shutil.which(tool)
+        if found:
+            (d / tool).symlink_to(found)
+    real_find = shutil.which("find")
+    (d / "find").write_text(f'#!/bin/sh\nfor a in "$@"; do [ "$a" = -printf ] && '
+                            f'{{ echo "find: -printf: unknown primary or operator" >&2; exit 1; }}; '
+                            f'done\nexec {real_find} "$@"\n')
+    (d / "shasum").write_text(
+        f'#!{sys.executable}\nimport hashlib, sys\n'
+        'a = sys.argv[1:]\nassert a[:2] == ["-a", "256"], a\n'
+        'for n in a[2:] or ["-"]:\n'
+        '    h = hashlib.sha256((sys.stdin.buffer if n == "-" else open(n, "rb")).read())\n'
+        '    sys.stdout.write(h.hexdigest() + "  " + n + "\\n")\n')
+    for t in ("find", "shasum"):
+        (d / t).chmod(0o755)
+    return str(d)
+
+
+def _run_recipe(recipe, root, path):
     import subprocess
+
+    return subprocess.run(["sh", "-c", recipe.replace("cd FOLDER", f"cd '{root}'")],
+                          capture_output=True, text=True, env={"PATH": path, "HOME": str(root)})
+
+
+@pytest.mark.skipif(_POSIX, reason="the recipes are POSIX sh")
+def test_the_manifest_recipe_prints_the_same_sha256(tmp_path):
+    import os
 
     root = release_bundle(tmp_path / "rel")
     (root / "notes with space.txt").write_text("n")
-    recipe = bringup.MANIFEST_RECIPE.replace("cd FOLDER", f"cd '{root}'")
-    out = subprocess.run(["bash", "-c", recipe], capture_output=True, text=True, check=True)
-    assert out.stdout.split()[0] == bringup.check_bundle(root, tmp_path / "w").sha256
+    (root / "A.txt").write_text("a")
+    (root / "a.txt").write_text("b")
+    want = bringup.check_bundle(root, tmp_path / "w").sha256
+    if sys.platform != "darwin":      # the GNU recipe needs GNU find and sha256sum
+        out = _run_recipe(bringup.MANIFEST_RECIPE, root, os.environ["PATH"])
+        assert out.returncode == 0 and out.stdout.split()[0] == want
+    # the macOS recipe: on this box with the real tools, and on a simulated Mac
+    real = _run_recipe(bringup.MANIFEST_RECIPE_MACOS, root, os.environ["PATH"])
+    assert real.returncode == 0 and real.stdout.split()[0] == want
+    mac = _run_recipe(bringup.MANIFEST_RECIPE_MACOS, root, _mac_path(tmp_path))
+    assert mac.returncode == 0 and mac.stdout.split()[0] == want, mac.stderr
+
+
+@pytest.mark.skipif(_POSIX, reason="the recipes are POSIX sh")
+def test_twin_the_gnu_recipe_fails_on_a_simulated_mac(tmp_path):
+    root = release_bundle(tmp_path / "rel")
+    want = bringup.check_bundle(root, tmp_path / "w").sha256
+    out = _run_recipe(bringup.MANIFEST_RECIPE, root, _mac_path(tmp_path))
+    assert want not in out.stdout and "-printf" in out.stderr
+
+
+@pytest.mark.skipif(_POSIX, reason="the recipes are POSIX sh")
+def test_the_zip_and_file_recipes_for_a_mac_print_the_same_sha256(tmp_path):
+    import subprocess
+
+    path = _mac_path(tmp_path)
+    for recipe in (bringup.ZIP_RECIPE_MACOS, bringup._unsigned.FILE_RECIPE_MACOS):
+        (tmp_path / recipe.split()[-1]).write_bytes(b"zipbytes")
+        out = subprocess.run(["sh", "-c", recipe], cwd=tmp_path, capture_output=True, text=True,
+                             env={"PATH": path})
+        assert out.stdout.split()[0] == _hex(b"zipbytes"), out.stderr
 
 
 def test_twin_any_change_to_any_file_changes_the_folders_sha256(tmp_path):
