@@ -11,14 +11,13 @@ Do not edit anything here by hand. Rebuild it with `scripts/vendor_pyverify.sh` 
 | Field | Value |
 |---|---|
 | Wheel | `mps3_pyverify-0.1.0-py3-none-any.whl` |
-| sha256 | `8747505d18e5608745b34c4bf728d079c459fbadf8e4a7051cdb3084ccbdb334` |
+| sha256 | `ac1865a3dc7dd5c5be81f859bc54a7776ef5408b019fde31845bf9b46c48c9c1` |
 | Built from | `git@github.com:SoC-Labs/MPS3-NanoSoC-Verification-Platform-Dev.git` |
-| Status | **DEV ONLY: integ/r3 e3c5fece (all Release 3 lanes, gate green). Re-vendor from the Release 3 tag before 1.2.0.** |
-| Platform commit | `e3c5feceec0ff1d559e1215e42d751c8882d12c6` (2026-10-14T20:59:03+01:00) |
-| Commit subject | Merge remote-tracking branch 'origin/lane/r3-m2fix' into integ/r3-next |
-| Last pyverify change at or before it | `29e67d28efb66c516c817e488037c1a39ef558ff` |
+| Platform commit | `df549e93751c13ba486b9dbf5c29722b5e674d2e` (2026-10-16T23:04:34+01:00) |
+| Commit subject | soak_linux: swaps on a claimed board ride the ssh tunnel (6900 + 6910) |
+| Last pyverify change at or before it | `35f9e43b19d0b068a251bcd4b87602b2f7706b97` |
 | Source | `git archive <commit> host/pyverify` (committed files only) |
-| Built with | `pip wheel --no-deps`, pip 26.2.1, Python 3.11.13, SOURCE_DATE_EPOCH=1792007943 |
+| Built with | `pip wheel --no-deps`, pip 26.2.1, Python 3.11.13, SOURCE_DATE_EPOCH=1792188274 |
 
 Check it: `sha256sum vendor/mps3_pyverify-0.1.0-py3-none-any.whl` must print the sha256 above.
 `tests/unit/test_l5_release.py` checks this in `make check`.
