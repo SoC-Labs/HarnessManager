@@ -29,6 +29,7 @@ check() {
 
 if [[ "${1:-}" == "--check" ]]; then check; exit 0; fi
 if [[ "${1:-}" == "--wheel" ]]; then
+    # shellcheck disable=SC2034
     pyverify_wheel="" pyverify_from=""
     # shellcheck disable=SC1091
     . "$here/scripts/pyverify_pin.sh"
