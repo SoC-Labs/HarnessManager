@@ -13,8 +13,6 @@ boards behave as before.
 **Windows is not supported in 1.2.0**; it is planned for a later release. The release ships no
 Windows installer.
 
-**Platforms:** Linux and macOS. Windows is a **preview** in 1.2.0, not supported yet: `scripts/install.ps1` and the unit tests run on Windows, but the app, consoles and board access have not been signed off there.
-
 ### Linux boards
 - Linux boards: the DUT clock can be set (25/50/100 MHz presets) and is read back from the board.
 
