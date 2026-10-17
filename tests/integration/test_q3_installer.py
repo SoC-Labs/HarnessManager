@@ -121,12 +121,21 @@ def harness_wheel(dest: Path, version: str, *, requires=("fakedep>=1",),
                       requires=requires, extras={"serial": ("fakeserial",)}, scripts=scripts)
 
 
+def standin_pyverify(dest: Path) -> Path:
+    """A stand-in pyverify wheel, and the pyverify.pin that names it (sha256), in ``dest``."""
+    whl = make_wheel(dest, "mps3-pyverify", "0.1.0", {"pyverify_q3_standin.py": "X = 1\n"})
+    (dest / "pyverify.pin").write_text(
+        f"version=0.1.0\nsha256={hashlib.sha256(whl.read_bytes()).hexdigest()}\n"
+        "url=https://example.invalid/mps3_pyverify-0.1.0-py3-none-any.whl\n")
+    return whl
+
+
 @pytest.fixture
 def wheelhouse(tmp_path: Path) -> Path:
     wh = tmp_path / "wheelhouse"
     wh.mkdir()
     harness_wheel(wh, "0.1.0")
-    make_wheel(wh, "mps3-pyverify", "0.1.0", {"pyverify_q3_standin.py": "X = 1\n"})
+    standin_pyverify(wh)
     make_wheel(wh, "fakedep", "1.0", {"fakedep.py": "V = '1.0'\n"})
     make_wheel(wh, "fakedep", "2.0", {"fakedep.py": "V = '2.0'\n"})
     make_wheel(wh, "fakeserial", "1.0", {"fakeserial.py": "V = '1.0'\n"})
@@ -401,7 +410,7 @@ def test_no_index_explains_proxy_and_offline(box: Box, tmp_path: Path):
     alone = tmp_path / "alone"
     alone.mkdir()
     whl = harness_wheel(alone, "0.1.0", requires=("fakedep-nowhere>=1",))
-    make_wheel(alone, "mps3-pyverify", "0.1.0", {"pyverify_q3_standin.py": "X = 1\n"})
+    standin_pyverify(alone)
     env = box.env(PIP_INDEX_URL="http://127.0.0.1:9/simple", PIP_RETRIES="0", PIP_TIMEOUT="2")
     res = box.run("--from", str(whl), "--python", sys.executable, "--no-uv", env=env,
                   check=False)
@@ -409,6 +418,15 @@ def test_no_index_explains_proxy_and_offline(box: Box, tmp_path: Path):
     assert "the install did not finish" in res.stderr
     assert "HTTPS_PROXY" in res.stderr and "--offline DIR" in res.stderr
     assert "Running this again is safe" in res.stderr
+    assert not box.hm.exists()
+
+
+def test_twin_a_wheelhouse_pyverify_that_is_not_the_pinned_one_is_refused(box: Box, wheelhouse: Path):
+    # the wheelhouse's pyverify.pin names one sha256; the wheel there has another
+    (wheelhouse / "mps3_pyverify-0.1.0-py3-none-any.whl").write_bytes(b"a different build")
+    res = box.run(*offline(wheelhouse), check=False)
+    assert res.returncode == 1
+    assert "no mps3_pyverify wheel with sha256" in res.stderr
     assert not box.hm.exists()
 
 

@@ -390,15 +390,6 @@ else
     die "--from $src is not a checkout, a wheel file or a git URL"
 fi
 
-pyverify_wheel=""
-for ((i = 1; i < ${#find_links[@]}; i += 2)); do
-    for whl in "${find_links[$i]}"/mps3_pyverify-*.whl; do
-        [[ -f "$whl" ]] && pyverify_wheel="$whl"
-    done
-    [[ -n "$pyverify_wheel" ]] && break
-done
-[[ -n "$pyverify_wheel" ]] || die "no pyverify wheel (vendor/mps3_pyverify-*.whl) next to $what"
-
 # The tested dependency versions (constraints.txt, made by scripts/lock_deps.sh).
 constraint_args=()
 if [[ $latest -eq 0 ]]; then
@@ -550,6 +541,21 @@ needs $MIN_PY or newer"
     say "venv     $venv ($(py_version "$venv/bin/python"))"
 fi
 
+# pyverify: the wheel pyverify.pin names, verified by sha256 (scripts/pyverify_pin.sh).
+pyverify_wheel="" pyverify_from=""
+# shellcheck disable=SC1091
+. "$script_dir/pyverify_pin.sh"
+pin_file=""
+for cand in "${offline:+$offline/pyverify.pin}" "$pkg/pyverify.pin" "$(dirname "$pkg")/pyverify.pin" \
+            "$script_dir/pyverify.pin" "$checkout/pyverify.pin"; do
+    if [[ -n "$cand" && -f "$cand" ]]; then pin_file="$cand"; break; fi
+done
+[[ -n "$pin_file" ]] || die "no pyverify.pin next to $what (it names the pyverify wheel to install)"
+vendor_dirs=()
+for ((i = 1; i < ${#find_links[@]}; i += 2)); do vendor_dirs+=("${find_links[$i]}"); done
+pyverify_resolve "$pin_file" "$work/pyverify" "$offline" ${vendor_dirs[@]+"${vendor_dirs[@]}"}
+say "pyverify $(pyverify_pin_get "$pin_file" version)  ($(basename "$pyverify_wheel"), sha256 verified, from $pyverify_from)"
+
 # -- install ---------------------------------------------------------------------------
 shown="$what"
 if [[ -n "$extras" ]]; then shown="$what [$extras]"; fi
@@ -583,7 +589,7 @@ if [[ $use_uv -eq 1 ]]; then
     uvpip() {
         uv pip install --quiet ${uv_flags[@]+"${uv_flags[@]}"} --python "$venv/bin/python" "$@"
     }
-    # pyverify keeps its version number across commits: always reinstall the vendored one.
+    # pyverify keeps its version number across commits: always reinstall the pinned one.
     uvpip --reinstall-package mps3-pyverify --no-deps "$pyverify_wheel" || install_failed
     # --upgrade-package, not --upgrade: an upgrade of everything could swap the vendored
     # pyverify for a same-named package from the index.

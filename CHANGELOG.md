@@ -11,6 +11,7 @@ API (docs/API.md says what changed).
 - The "check the checksum yourself" commands for an unsigned bundle, folder or card image now
   also come in a macOS form (`shasum -a 256`, BSD `find`) that prints the same sha256; the app,
   the command line and `error.data.unsigned.how_macos` show both.
+- Install: Harness Manager now installs the platform's published pyverify wheel, named by exact version and sha256 in `pyverify.pin`, instead of a copy kept in the repository. The installer checks the sha256 and stops, naming the url and both hashes, if it differs or the download fails; a wheelhouse (`--offline`) still installs with no network.
 
 ## 1.2.0 (unreleased)
 
@@ -20,8 +21,6 @@ boards behave as before.
 
 **Windows is not supported in 1.2.0**; it is planned for a later release. The release ships no
 Windows installer.
-
-**Platforms:** Linux and macOS. Windows is a **preview** in 1.2.0, not supported yet: `scripts/install.ps1` and the unit tests run on Windows, but the app, consoles and board access have not been signed off there.
 
 ### Linux boards
 - Linux boards: the DUT clock can be set (25/50/100 MHz presets) and is read back from the board.

@@ -221,7 +221,8 @@ def cmd_app(ctx: Ctx) -> int:
             wheel_builder=build_wheel(ctx.runner, a.python) if not a.wheel else None,
             prebuilt_wheel=Path(a.wheel) if a.wheel else None, lock_tool=tool,
             prebuilt_lock=Path(a.lock) if a.lock else None,
-            prebuilt_lock_universal=a.lock_universal, runner=ctx.runner)
+            prebuilt_lock_universal=a.lock_universal, runner=ctx.runner,
+            pyverify_wheel=Path(a.pyverify_wheel) if a.pyverify_wheel else None)
         for w in build.warnings[len(pre.warnings):]:
             ctx.warn(w)
         if ctx.publish and not build.lock_tool.universal and not a.allow_non_universal_lock:
@@ -584,6 +585,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--access", default="github-token", choices=("github-token", "public"),
                    help="asset access (U1: private GitHub Releases -> github-token)")
     p.add_argument("--wheel", help="use this wheel instead of building one")
+    p.add_argument("--pyverify-wheel", help="the published pyverify wheel to attach (must have "
+                   "the sha256 in pyverify.pin); default: the matching wheel in vendor/")
     p.add_argument("--lock", help="use this hashed lock instead of compiling one")
     p.add_argument("--lock-universal", action="store_true",
                    help="the --lock file is universal (uv --universal)")

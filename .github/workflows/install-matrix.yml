@@ -19,6 +19,7 @@ on:
       - "scripts/**"
       - "packaging/**"
       - "vendor/**"
+      - "pyverify.pin"
       - "pyproject.toml"
       - "constraints.txt"
       - ".github/workflows/install-matrix.yml"

@@ -13,7 +13,8 @@ it is planned for a later release. The Windows notes below describe that work in
   downloads one, with no root.
 - git, to clone the repository (it is private: ask SoC Labs for access).
 - A network connection to PyPI for the dependencies (FastAPI, uvicorn, websockets,
-  cryptography), directly or through a proxy. pyverify comes from `vendor/`. With no
+  cryptography), directly or through a proxy. pyverify comes from the platform's release on
+  GitHub (see [Where pyverify comes from](#where-pyverify-comes-from)). With no
   network, see [No network](#no-network-a-wheelhouse).
 - For the app window: Chrome, Chromium, Edge or Brave. Without one, `harness-manager app`
   opens a browser tab. No system library is needed: every dependency is a wheel.
@@ -70,7 +71,7 @@ steps:
    SD write) refuses the stop, and then the installer stops too. Wait for the job, then
    run it again.
 4. Make the venv, or reuse it when it already holds Python 3.10+.
-5. Install the vendored pyverify wheel by its path, then Harness Manager with its
+5. Install the pinned pyverify wheel by its path (checked against its sha256), then Harness Manager with its
    dependencies (`--find-links vendor`), at the versions pinned in `constraints.txt`.
 6. Write the `harness-manager` command, and check that it runs.
 7. On Linux, add Harness Manager to the desktop's application menu; on macOS, make
@@ -210,8 +211,8 @@ On a machine with network, and the **same Python version, OS and CPU** as the ta
 scripts/make_wheelhouse.sh --with-serial /path/to/wheelhouse    # or: make wheelhouse
 ```
 
-It holds the Harness Manager wheel, the vendored pyverify wheel, every pinned dependency
-and `constraints.txt` (about 10 MB). Copy it and the checkout across, then:
+It holds the Harness Manager wheel, the pinned pyverify wheel (downloaded and checked when
+you make it), every pinned dependency, `constraints.txt` and `pyverify.pin` (about 10 MB). Copy it and the checkout across, then:
 
 ```bash
 scripts/install.sh --offline /path/to/wheelhouse --with-serial
@@ -304,9 +305,9 @@ terminal.
 ## Upgrade and uninstall
 
 - **Upgrade:** `git pull`, then run the installer again. It reinstalls Harness Manager
-  and the vendored pyverify in the same venv, with your extras and menu choice, and
-  never touches the state directory. A pyverify rebuilt from a newer platform commit
-  keeps its version number, so the installer always reinstalls it.
+  and the pinned pyverify in the same venv, with your extras and menu choice, and
+  never touches the state directory. The installer always reinstalls the pinned
+  pyverify, whatever version the venv holds.
 - **Uninstall:** `scripts/install.sh --uninstall` (or `-Uninstall`). It stops the
   service, removes the venv, the self-updated versions, the command and the menu entry,
   and leaves the state directory: your `boards.toml`, SD backups, content store and logs.
@@ -430,7 +431,7 @@ Any venv works. Install pyverify first, by its path, so the package index never 
 which pyverify you get:
 
 ```bash
-python3 -m venv ~/hm && ~/hm/bin/pip install vendor/mps3_pyverify-*.whl
+python3 -m venv ~/hm && ~/hm/bin/pip install "$(scripts/pin_pyverify.sh --wheel)"
 ~/hm/bin/pip install --find-links vendor '.[serial]'
 ```
 
@@ -474,10 +475,42 @@ on PyPI, and pip prefers the highest version it can see there.
 Both integration tests are marked `slow` and `packaging`, take about a minute each, and
 skip with the reason when PyPI is unreachable.
 
-## The vendored pyverify
+## Where pyverify comes from
 
 pyverify lives in the platform repo (mps3-nanosoc-platform, `host/pyverify`). Harness
-Manager never re-implements the shell protocol, so it needs pyverify at run time.
+Manager never re-implements the shell protocol, so it needs pyverify at run time, and it
+installs the platform's **published** wheel, not a copy kept here.
+
+`pyverify.pin` (repo root) is the one place that names it: the version (the platform release
+version, tag `v<version>`), the sha256, and the url
+`https://github.com/SoC-Labs/MPS3-NanoSoC-Verification-Platform/releases/download/v<version>/mps3_pyverify-<version>-py3-none-any.whl`.
+`pyproject.toml` depends on exactly that version (`mps3-pyverify==<version>`).
+
+`scripts/install.sh` (and `install.ps1`) take the wheel in this order, and install it only
+when its sha256 is the pin's:
+
+1. a wheel in the `--offline DIR` wheelhouse;
+2. a wheel in `vendor/`, while one there matches (a transition for development and CI, until
+   the release is published; see `vendor/README.md`);
+3. the pin's url, downloaded to a temporary file.
+
+A mismatch or a failed download stops the install and prints the url, the sha256 it got and the
+sha256 the pin wants. Nothing unverified is installed. `HM_PYVERIFY_URL` replaces the url
+(a mirror); the sha256 is still checked. With no network, use a wheelhouse: `make wheelhouse`
+downloads and checks the pinned wheel once.
+
+To pin a new pyverify (the release owner gives the version and the sha256 from the release's
+`SHA256SUMS`):
+
+```bash
+scripts/pin_pyverify.sh 2.2.1 <sha256>     # or: make pin-pyverify VERSION=2.2.1 SHA=<sha256>
+```
+
+It rewrites `pyverify.pin` and the `pyproject.toml` dependency together. `make release`
+attaches the wheel the pin names and refuses any other (`--pyverify-wheel FILE` gives the
+downloaded one once `vendor/` is gone).
+
+### The vendored fallback (until the release is published)
 
 `vendor/mps3_pyverify-<version>-py3-none-any.whl` is built by:
 
@@ -487,17 +520,15 @@ make vendor-pyverify PLATFORM_REF=<commit>   # a given commit
 ```
 
 It builds from `git archive <commit> host/pyverify`, so uncommitted edits never reach
-the wheel and nothing is written into the platform repo. It pins the wheel's
-timestamps to the commit time, so the same commit gives the same sha256. It rewrites
-`vendor/README.md` with the commit, the sha256 and the tools used. Re-vendor whenever
-Harness Manager starts using a pyverify change, and commit the wheel and the README
-together.
+the wheel, rewrites `vendor/README.md`, and re-pins to the wheel it built. That pin is for
+development only: do not release it. Once the platform tag exists and `pin_pyverify.sh` has
+pinned it, `git rm vendor/mps3_pyverify-*.whl`.
 
-`make venv` installs pyverify from the vendored wheel, the one the app ships with. To
+`make venv` installs the pinned pyverify wheel, the one the app ships with. To
 change pyverify and Harness Manager together, ask for the platform checkout explicitly:
 `make venv DEV_PYVERIFY=1` (uses `../mps3-nanosoc-platform/host/pyverify`) or
 `make venv PYVERIFY=<dir>`. That checkout is whatever branch it is on, so keep it for
-development: `make release` refuses a venv whose pyverify is not the vendored wheel
+development: `make release` refuses a venv whose pyverify is not the pinned wheel
 (`ALLOW_DEV_PYVERIFY=1` overrides, for a dry run). Go back with `make clean venv`.
 
 Guards (`tools/venv_guard.py`, run by `make venv` and everything that uses it):
@@ -506,7 +537,7 @@ Guards (`tools/venv_guard.py`, run by `make venv` and everything that uses it):
 |---|---|---|
 | `VENV=` outside this checkout | `pip install -e .` would re-point that venv at this source | use this checkout's own `.venv` |
 | harness_manager not loading from this checkout's `src`, or two `__editable__.harness_manager-*.pth` | another checkout or worktree installed into the venv | `make clean venv` |
-| `make release` with a pyverify that is not the vendored wheel | the release would be tested against code it does not ship | `make clean venv` |
+| `make release` with a pyverify that is not the pinned wheel | the release would be tested against code it does not ship | `make clean venv` |
 
 At run time the service also checks that its pyverify has every module the MPS3 pack
 imports, and names the pyverify path and the fix if not.

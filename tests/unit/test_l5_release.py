@@ -31,7 +31,7 @@ else:  # pragma: no cover - Python 3.10
 ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 VENDOR = ROOT / "vendor"
-SCRIPTS = ("install.sh", "smoke_install.sh", "vendor_pyverify.sh")
+SCRIPTS = ("install.sh", "smoke_install.sh", "vendor_pyverify.sh", "pin_pyverify.sh", "make_wheelhouse.sh")
 RELEASE_FILES = ("README.md", "CHANGELOG.md", "docs/INSTALL.md", "docs/USER_GUIDE.md",
                  "vendor/README.md", "Makefile", "pyproject.toml", ".github/workflows/ci.yml",
                  *(f"scripts/{s}" for s in SCRIPTS), "scripts/install.ps1")
@@ -58,10 +58,25 @@ def test_one_version_everywhere():
     assert first.group(1) == version, "the newest CHANGELOG entry is not __version__"
 
 
-def test_exactly_one_vendored_pyverify_wheel():
-    assert len(_pyverify_wheels()) == 1, [p.name for p in _pyverify_wheels()]
+# vendor/ holds the pyverify wheel only as a dev and CI fallback until the platform release is
+# published (pyverify.pin names the published wheel). Once it is gone these tests have nothing
+# to check; while it is there it must be the pinned one.
+needs_vendor_wheel = pytest.mark.skipif(not _pyverify_wheels(), reason="vendor/ wheel removed")
 
 
+def test_at_most_one_vendored_pyverify_wheel():
+    assert len(_pyverify_wheels()) <= 1, [p.name for p in _pyverify_wheels()]
+
+
+@needs_vendor_wheel
+def test_the_vendored_wheel_is_the_pinned_one():
+    pin = dict(ln.split("=", 1) for ln in (ROOT / "pyverify.pin").read_text().splitlines()
+               if ln and not ln.startswith("#"))
+    assert hashlib.sha256(_pyverify_wheels()[0].read_bytes()).hexdigest() == pin["sha256"], (
+        "vendor/ holds a wheel that is not the pinned one: it would be ignored by the installers")
+
+
+@needs_vendor_wheel
 def test_vendored_wheel_matches_its_readme():
     wheel = _pyverify_wheels()[0]
     readme = (VENDOR / "README.md").read_text(encoding="utf-8")
@@ -73,10 +88,11 @@ def test_vendored_wheel_matches_its_readme():
     assert re.search(r"\| Platform commit \| `[0-9a-f]{40}` ", readme), "no platform commit"
 
 
+@needs_vendor_wheel
 def test_vendored_wheel_satisfies_the_dependency_and_carries_what_we_use():
     wheel = _pyverify_wheels()[0]
     dep = next(d for d in PYPROJECT["project"]["dependencies"] if d.startswith("mps3-pyverify"))
-    floor = re.search(r">=\s*([\d.]+)", dep)
+    floor = re.search(r"(?:>=|==)\s*([\d.]+)", dep)
     with zipfile.ZipFile(wheel) as z:
         names = set(z.namelist())
         meta = z.read(next(n for n in names if n.endswith(".dist-info/METADATA"))).decode()
