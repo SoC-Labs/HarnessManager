@@ -19,7 +19,7 @@ from harness_manager.demo import DemoEngine
 from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_V011
 from tests.fakes.t14_mock_api import real_daemon
 from tests.web import nav
-from tests.web.conftest import dump_failed_pages
+from tests.web.conftest import close_context, dump_failed_pages
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -56,7 +56,7 @@ class Showcase:
 
     def close(self) -> None:
         for ctx in self.contexts:
-            ctx.close()
+            close_context(ctx)
 
 
 def make_showcase(browser: Any, tmp_path: Any, monkeypatch: Any, request: Any, *,
