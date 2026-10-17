@@ -134,6 +134,23 @@ def daemon(request, engine, tmp_path):
         yield d
 
 
+def close_context(ctx) -> None:
+    """Close a browser context without leaving a route handler to fail after it.
+
+    A test that routes a request and answers it with ``route.fetch()`` + ``route.fulfill()``
+    can have a handler still running when the test ends. Closing under it makes the handler
+    raise ("Response has been disposed", "Target ... has been closed"), and Playwright's sync
+    API re-raises that from the NEXT API call in the process: the next test's
+    ``Browser.new_context``, which then fails for a test that did nothing wrong (CI flake on
+    test_twin_the_header_shows_the_uptime...). ``unroute_all(ignoreErrors)`` waits the handlers
+    out and drops what they raise."""
+    for target in (*ctx.pages, ctx):
+        unroute_all = getattr(target, "unroute_all", None)    # Playwright >= 1.41
+        if unroute_all is not None:
+            unroute_all(behavior="ignoreErrors")
+    ctx.close()
+
+
 @pytest.fixture
 def page_factory(browser, daemon, request):
     """``page_factory(scheme="light")`` -> a 1280x800 page on the UI, with errors collected."""
@@ -162,7 +179,7 @@ def page_factory(browser, daemon, request):
     yield make
     dump_failed_pages(request, pages)
     for ctx in contexts:
-        ctx.close()
+        close_context(ctx)
 
 
 @pytest.fixture(scope="session")
