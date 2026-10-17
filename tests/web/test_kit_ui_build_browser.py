@@ -204,9 +204,22 @@ def test_fetch_shows_its_progress_then_done_and_a_kit_for_another_static_is_refu
     expect_node(page, "setup", "current")
     # the good folder: the progress line, then done; Setup warns only for Vivado now
     by_id(page, "kit-source-path").fill(str(kf.FIXTURE))
+    # The result block is on screen only until Setup is done: the stepper then moves on to
+    # Design and the block goes with the panel, about a frame after the "is cached" line is
+    # drawn. A poll (expect / inner_text) can miss that window on a slow runner, so record
+    # every state the block is drawn in (a MutationObserver sees each commit) and read the record.
+    page.evaluate("""() => {
+      window.__fetchSeen = [];
+      const grab = () => { const el = document.querySelector('[data-testid="kit-fetch-result"]');
+        if (el) window.__fetchSeen.push(el.innerText); };
+      new MutationObserver(grab).observe(document.body, {subtree: true, childList: true, characterData: true});
+    }""")
     page.locator('[data-action="kit_fetch"]').click()
-    expect(result).to_contain_text("mps3/0x72BB0A36/vivado-2024.1 is cached (from path)", timeout=T)
-    text = result.inner_text()
+    page.wait_for_function(
+        "() => window.__fetchSeen.some((t) => t.includes('is cached (from path)'))", timeout=T)
+    seen = page.evaluate("() => window.__fetchSeen")
+    text = next(t for t in seen if "is cached" in t)
+    assert "mps3/0x72BB0A36/vivado-2024.1 is cached (from path)" in text
     assert text.index("fetch: started") < text.index("is cached")
     expect_node(page, "setup", "warn")
     expect_node(page, "design", "current")
