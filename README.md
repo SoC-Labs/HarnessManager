@@ -195,7 +195,7 @@ it; the next command starts it again.
 ## For developers
 
 ```bash
-make venv     # .venv: harness-manager editable, pyverify from the vendored wheel (as shipped)
+make venv     # .venv: harness-manager editable, pyverify from the pinned wheel (as shipped)
 make check    # lint and the whole test suite, against a virtual MPS3
 make dist     # sdist and wheel in dist/, with the pyverify wheel
 ```
@@ -204,7 +204,7 @@ make dist     # sdist and wheel in dist/, with the pyverify wheel
 - The local service API: [docs/API.md](docs/API.md)
 - Contracts between teams: [docs/CONTRACTS.md](docs/CONTRACTS.md)
 - The team plan: [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)
-- Installing, packaging, CI and the vendored pyverify: [docs/INSTALL.md](docs/INSTALL.md)
+- Installing, packaging, CI and where pyverify comes from: [docs/INSTALL.md](docs/INSTALL.md)
 - What changed: [CHANGELOG.md](CHANGELOG.md)
 
 ## Licence

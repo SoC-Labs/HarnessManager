@@ -1,11 +1,11 @@
 # SoC Labs Harness Manager: developer entry points.
 #   make venv    create .venv (Python 3.11): harness-manager editable, pyverify from the
-#                VENDORED WHEEL (what the app ships with). A development pyverify only when
+#                PINNED WHEEL (what the app ships with). A development pyverify only when
 #                asked: make venv DEV_PYVERIFY=1 (../mps3-nanosoc-platform/host/pyverify) or
 #                make venv PYVERIFY=<dir>; then `make release` refuses unless ALLOW_DEV_PYVERIFY=1.
 #                Every target that needs the venv runs tools/venv_guard.py first: it refuses a
 #                VENV outside this checkout, a harness_manager that does not load from this
-#                checkout's src (or two editable links), and (release) a non-vendored pyverify.
+#                checkout's src (or two editable links), and (release) a non-pinned pyverify.
 #   make check   lint + tokens-check + unit + integration (the gate every team runs before
 #                handing work back)
 #   make tokens  regenerate tokens.css, design/generated/* from design/tokens.json
@@ -16,13 +16,14 @@
 #                the HIL runbooks unattended (docs/HIL_AUTO.md; david runs it, with the lease)
 #
 # Release (lane L5):
-#   make dist            sdist + wheel in dist/, with the vendored pyverify wheel, constraints.txt
+#   make dist            sdist + wheel in dist/, with the pinned pyverify wheel, constraints.txt
 #                        and SHA256SUMS
 #   make install-local   install this checkout for your user (scripts/install.sh; INSTALL_ARGS=...)
 #   make smoke-install   install, run and uninstall in a throwaway HOME (scripts/smoke_install.sh)
 #   make wheelhouse      every wheel for an offline install, in dist/wheelhouse (WHEELHOUSE_ARGS=...)
 #   make lock            re-pin constraints.txt (needs uv; LOCK_ARGS=--upgrade moves every pin)
-#   make vendor-pyverify rebuild vendor/mps3_pyverify-*.whl from $(PLATFORM) at PLATFORM_REF
+#   make pin-pyverify VERSION=2.2.1 SHA=<sha256>   pin the published pyverify wheel (pyverify.pin, pyproject)
+#   make vendor-pyverify (dev fallback) rebuild vendor/mps3_pyverify-*.whl from $(PLATFORM) at PLATFORM_REF
 #
 # Signed releases (lane OTA-R; docs/RELEASING.md, keys: docs/KEYS.md). Each is a DRY RUN into
 # dist/release/ (written, signed, verified; the gh steps only written) unless PUBLISH=1.
@@ -36,17 +37,18 @@ PY        ?= python3.11
 VENV      ?= .venv
 PLATFORM  ?= ../mps3-nanosoc-platform
 PLATFORM_REF ?= HEAD
-# pyverify comes from the VENDORED WHEEL by default, because that is what the app ships with.
+# pyverify comes from the PINNED WHEEL by default, because that is what the app ships with.
 # The sibling platform checkout is a dev tree on whatever branch other work left it on; linking
 # it silently broke the app twice (Oct 2026). Editable from it only on request:
 #   make venv DEV_PYVERIFY=1                     $(PLATFORM)/host/pyverify
 #   make venv PYVERIFY=../x/host/pyverify        any other directory
-# Going back: `make clean venv`, or `pip install --force-reinstall vendor/mps3_pyverify-*.whl`.
+# Going back: `make clean venv`, or `pip install --force-reinstall $$(scripts/pin_pyverify.sh --wheel)`.
 DEV_PYVERIFY ?=
 PYVERIFY  ?= $(if $(DEV_PYVERIFY),$(PLATFORM)/host/pyverify,)
 ALLOW_DEV_PYVERIFY ?=
 GUARD      = $(PY) tools/venv_guard.py
-PYVERIFY_WHEEL = $(firstword $(wildcard vendor/mps3_pyverify-*.whl))
+# The wheel pyverify.pin names (sha256 checked): vendor/ while it matches, else downloaded.
+PYVERIFY_WHEEL = $(shell scripts/pin_pyverify.sh --wheel)
 INSTALL_ARGS ?=
 WHEELHOUSE_ARGS ?=
 LOCK_ARGS ?=
@@ -57,7 +59,7 @@ BIN        = $(VENV)/bin
 RELEASE    = $(BIN)/python -m tools.release
 RELEASE_COMMON = $(if $(MIRROR),--mirror $(MIRROR)) $(if $(PUBLISH),--publish) $(RELEASE_ARGS)
 
-.PHONY: venv check lint test hil hil-auto web-deps clean dist install-local smoke-install vendor-pyverify \
+.PHONY: venv check lint test hil hil-auto web-deps clean dist install-local smoke-install vendor-pyverify pin-pyverify \
 	wheelhouse lock release-guard release release-harness release-promote tokens tokens-check
 
 # The guard runs on every `make venv` and everything that depends on it (check, release, ...),
@@ -133,6 +135,9 @@ wheelhouse:
 
 lock:
 	scripts/lock_deps.sh $(LOCK_ARGS)
+
+pin-pyverify:
+	scripts/pin_pyverify.sh $(VERSION) $(SHA)
 
 vendor-pyverify:
 	PYTHON=$(if $(wildcard $(BIN)/python),$(BIN)/python,python3) scripts/vendor_pyverify.sh $(PLATFORM) $(PLATFORM_REF)

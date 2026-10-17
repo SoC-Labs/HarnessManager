@@ -24,9 +24,9 @@
 #   --index-url URL      a package index other than PyPI (a mirror)
 #   --no-index           only --find-links, never an index (tests use this)
 #
-# DIR gets the Harness Manager wheel, the vendored pyverify wheel, the pinned
-# dependencies (constraints.txt), constraints.txt itself, install.sh and
-# install.ps1, and SHA256SUMS. Copy DIR across, then:
+# DIR gets the Harness Manager wheel, the pinned pyverify wheel (checked against
+# pyverify.pin, which is copied too), the pinned dependencies (constraints.txt), constraints.txt
+# itself, install.sh, pyverify_pin.sh and install.ps1, and SHA256SUMS. Copy DIR across, then:
 #
 #   scripts/install.sh --offline DIR                                (Linux, macOS)
 #   powershell -ExecutionPolicy Bypass -File DIR\install.ps1 -Offline DIR   (Windows)
@@ -79,6 +79,15 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
+# The pinned pyverify wheel (pyverify.pin): from vendor/ if that wheel's sha256 is the pin's,
+# else downloaded from the platform release and verified. Never an unverified wheel.
+pyverify_wheel="" pyverify_from=""
+# shellcheck disable=SC1091
+. "$here/scripts/pyverify_pin.sh"
+pyverify_resolve "$here/pyverify.pin" "$work/pyverify" "" "$here/vendor"
+cp "$pyverify_wheel" "$out/"
+printf 'make_wheelhouse: pyverify %s (sha256 verified, from %s)\n' \
+    "$(pyverify_pin_get "$here/pyverify.pin" version)" "$pyverify_from"
 "$py" -m venv "$work/venv"
 if [[ $no_index -eq 0 ]]; then
     "$work/venv/bin/python" -m pip install --quiet --disable-pip-version-check --upgrade pip \
@@ -105,7 +114,7 @@ if [[ -n "$platform" ]]; then
     fi
     cross=(--target "$platform" --python-version "$pyver" --hm-wheel "$hm_wheel"
            --constraints "$here/constraints.txt" --extras "${extras#,}" --out "$out"
-           --find-links "$here/vendor" ${links[@]+"${links[@]}"})
+           --find-links "$out" ${links[@]+"${links[@]}"})
     if [[ $no_index -eq 1 ]]; then cross+=(--no-index); fi
     if [[ -n "$index_url" ]]; then cross+=(--index-url "$index_url"); fi
     "$work/venv/bin/python" "$here/scripts/wheelhouse_cross.py" "${cross[@]}"
@@ -117,10 +126,15 @@ else
     if [[ -n "$extras" ]]; then spec="$work/src[${extras#,}]"; fi
     # uv too: install.sh puts it in the venv, and the app's self-update builds new versions with it.
     "$work/venv/bin/python" -m pip wheel --quiet --disable-pip-version-check \
-        --find-links "$here/vendor" --constraint "$here/constraints.txt" -w "$out" "$spec" "uv>=0.4"
+        --find-links "$out" --constraint "$here/constraints.txt" -w "$out" "$spec" "uv>=0.4"
 fi
-cp "$here"/vendor/mps3_pyverify-*.whl "$here/constraints.txt" "$here/scripts/install.sh" \
-    "$here/scripts/install.ps1" "$out/"
+# pip must not have swapped in another pyverify of the same name.
+want_sha="$(pyverify_pin_get "$here/pyverify.pin" sha256)"
+for w in "$out"/mps3_pyverify-*.whl; do
+    [[ "$(pyverify_sha256 "$w")" == "$want_sha" ]] || die "$w is not the pinned pyverify wheel (sha256 $want_sha)"
+done
+cp "$here/pyverify.pin" "$here/constraints.txt" "$here/scripts/install.sh" \
+    "$here/scripts/pyverify_pin.sh" "$here/scripts/install.ps1" "$out/"
 (cd "$out" && "$work/venv/bin/python" -c "import hashlib, pathlib; print(''.join(
     f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n'
     for p in sorted(pathlib.Path('.').iterdir()) if p.is_file() and p.name != 'SHA256SUMS'), end='')" > SHA256SUMS)

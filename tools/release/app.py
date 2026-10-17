@@ -8,7 +8,8 @@ What an app release ``V`` puts in the tree (OTA §4.1), under the per-version re
   --universal --generate-hashes`` (every OS and Python >= 3.10, by markers); without uv,
   ``pip-compile --generate-hashes`` (pip-tools), which resolves for THIS machine only, so
   the release records ``universal: false`` and ``--publish`` refuses it unless told;
-- ``mps3_pyverify-X-py3-none-any.whl``: the vendored codec as a ``dep`` artifact. The lock
+- ``mps3_pyverify-X-py3-none-any.whl``: the pinned codec as a ``dep`` artifact (``pyverify.pin``
+  names version X and its sha256; a wheel with any other sha256 is refused). The lock
   pins it by name and hash (``mps3-pyverify==X --hash=sha256:…``); the client's stage step
   installs it from the verified download (OTA §4.1), because no index serves it.
 
@@ -286,6 +287,47 @@ def compile_lock(tool: LockTool, src: Path, out: Path, *, extras: tuple[str, ...
     return raw
 
 
+def read_pyverify_pin(root: Path) -> dict[str, str]:
+    """``pyverify.pin`` of a tree: ``version``, ``sha256``, ``url`` (``key=value`` lines)."""
+    path = Path(root) / "pyverify.pin"
+    if not path.is_file():
+        raise ReleaseError("pyverify.pin is missing", hint="scripts/pin_pyverify.sh <version> <sha256>")
+    pin = {}
+    for ln in path.read_text(encoding="utf-8").splitlines():
+        if ln.strip() and not ln.lstrip().startswith("#") and "=" in ln:
+            k, v = ln.split("=", 1)
+            pin[k.strip()] = v.strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", pin.get("sha256", "")) or not pin.get("version"):
+        raise ReleaseError("pyverify.pin has no valid version and sha256 lines")
+    return pin
+
+
+def pinned_dep(src: Path, supplied: Path | None = None) -> Path:
+    """The pyverify wheel to attach: one whose sha256 IS the pin's. ``supplied`` (the published
+    wheel, downloaded) wins; else the wheel in ``vendor/``. Anything else is refused."""
+    pin = read_pyverify_pin(src)
+    want = pin["sha256"]
+    cands = [Path(supplied)] if supplied is not None else sorted(
+        (src / "vendor").glob("mps3_pyverify-*.whl"))
+    if not cands:
+        raise ReleaseError(
+            f"no pyverify wheel to attach: pyverify.pin wants {pin['version']} (sha256 {want}) "
+            f"and vendor/ holds none", hint=f"download {pin.get('url', 'the published wheel')} and "
+            "pass it with --pyverify-wheel")
+    for c in cands:
+        got = sha256_file(c)
+        if got == want:
+            if c.name.split("-")[1] != pin["version"]:
+                raise ReleaseError(f"{c.name} has the pinned sha256 but is not named for the "
+                                   f"pinned version {pin['version']}")
+            return c
+    raise ReleaseError(
+        f"{', '.join(c.name for c in cands)} does not match pyverify.pin: sha256 "
+        f"{sha256_file(cands[0])}, the pin says {want} (version {pin['version']})",
+        hint="attach the published wheel the pin names (--pyverify-wheel), or fix the pin with "
+             "scripts/pin_pyverify.sh")
+
+
 def pin_dep_in_lock(raw: str, dep_name: str, dep_version: str, dep_sha256: str) -> str:
     """Replace the resolver's ``mps3-pyverify`` entry (and its hash lines) with one line that
     pins the vendored wheel by version and sha256. Refuses a lock that does not name it, or
@@ -307,8 +349,8 @@ def pin_dep_in_lock(raw: str, dep_name: str, dep_version: str, dep_sha256: str) 
         raise ReleaseError(f"the lock does not name {dep_name}",
                            hint="pyproject.toml must depend on it")
     if parse_version(found) != parse_version(dep_version):
-        raise ReleaseError(f"the lock resolved {dep_name}=={found}, but vendor/ holds "
-                           f"{dep_version}", hint="run make vendor-pyverify, or fix the pin")
+        raise ReleaseError(f"the lock resolved {dep_name}=={found}, but the pin is "
+                           f"{dep_version}", hint="fix pyproject.toml or pyverify.pin (scripts/pin_pyverify.sh)")
     lines = [ln for ln in out if ln.strip()]
     return "\n".join(lines) + "\n"
 
@@ -348,7 +390,7 @@ def build_app_release(repo: Path, layout: Layout, pre: Preconditions, *, access:
                       wheel_builder: WheelBuilder | None = None, prebuilt_wheel: Path | None = None,
                       lock_tool: LockTool | None = None, prebuilt_lock: Path | None = None,
                       prebuilt_lock_universal: bool = False, runner: Runner = run,
-                      workdir: Path | None = None) -> AppBuild:
+                      pyverify_wheel: Path | None = None, workdir: Path | None = None) -> AppBuild:
     """Build (or take) the wheel and lock, pin pyverify, write the assets, return the entry."""
     v, tag = pre.version, pre.tag
     warnings: list[str] = []
@@ -369,12 +411,8 @@ def build_app_release(repo: Path, layout: Layout, pre: Preconditions, *, access:
         wheel_name = f"{DIST}-{v}-py3-none-any.whl"
         if wheel.name != wheel_name:
             raise ReleaseError(f"the wheel is named {wheel.name}, expected {wheel_name}")
-        # the dep: the vendored pyverify wheel of THAT commit
-        deps = sorted((src / "vendor").glob("mps3_pyverify-*.whl"))
-        if len(deps) != 1:
-            raise ReleaseError(f"vendor/ at {pre.commit[:12]} holds {len(deps)} pyverify wheels, "
-                               "expected one")
-        dep = deps[0]
+        # the dep: the pyverify wheel pyverify.pin of THAT commit names (sha256 checked)
+        dep = pinned_dep(src, pyverify_wheel)
         dep_version = dep.name.split("-")[1]
         # the lock
         if prebuilt_lock is not None:

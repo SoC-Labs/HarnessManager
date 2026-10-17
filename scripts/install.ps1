@@ -450,12 +450,59 @@ try {
     }
     $links = @($links | Where-Object { Test-Path $_ -PathType Container })
 
-    $pyverifyWheel = $null
-    foreach ($dir in $links) {
-        $found = @(Get-ChildItem -Path $dir -Filter 'mps3_pyverify-*.whl' -ErrorAction SilentlyContinue)
-        if ($found.Count -gt 0) { $pyverifyWheel = $found[-1].FullName; break }
+    # pyverify: the wheel pyverify.pin names, verified by sha256 (never an unverified wheel).
+    function Get-PinValue([string]$File, [string]$Key) {
+        $line = @(Select-String -Path $File -Pattern ("^" + $Key + "=") | Select-Object -Last 1)
+        if ($line.Count -eq 0) { return '' }
+        return ($line[0].Line -replace ('^' + $Key + '='), '').Trim()
     }
-    if (-not $pyverifyWheel) { Fail "no pyverify wheel (vendor\mps3_pyverify-*.whl) next to $what" }
+    function Find-PinnedWheel([string]$Dir, [string]$Want) {
+        if (-not (Test-Path $Dir -PathType Container)) { return $null }
+        foreach ($w in @(Get-ChildItem -Path $Dir -Filter 'mps3_pyverify-*.whl' -ErrorAction SilentlyContinue)) {
+            if ((Get-FileHash -Algorithm SHA256 -Path $w.FullName).Hash.ToLower() -eq $Want) { return $w.FullName }
+        }
+        return $null
+    }
+    $pinFile = $null
+    $pinCandidates = @()
+    if ($Offline) { $pinCandidates += (Join-Path $Offline 'pyverify.pin') }
+    if ($pkg) {
+        if (Test-Path $pkg -PathType Container) { $pinCandidates += (Join-Path $pkg 'pyverify.pin') }
+        else { $pinCandidates += (Join-Path (Split-Path -Parent $pkg) 'pyverify.pin') }
+    }
+    $pinCandidates += (Join-Path $PSScriptRoot 'pyverify.pin')
+    $pinCandidates += (Join-Path $Checkout 'pyverify.pin')
+    foreach ($c in $pinCandidates) { if (Test-Path $c -PathType Leaf) { $pinFile = $c; break } }
+    if (-not $pinFile) { Fail "no pyverify.pin next to $what (it names the pyverify wheel to install)" }
+    $pinVersion = Get-PinValue $pinFile 'version'
+    $pinSha = Get-PinValue $pinFile 'sha256'
+    $pinUrl = if ($env:HM_PYVERIFY_URL) { $env:HM_PYVERIFY_URL } else { Get-PinValue $pinFile 'url' }
+    if ($pinSha -notmatch '^[0-9a-f]{64}$') { Fail "$pinFile has no valid sha256 line" }
+    $pyverifyWheel = $null
+    if ($Offline) { $pyverifyWheel = Find-PinnedWheel $Offline $pinSha }
+    if (-not $pyverifyWheel) {
+        foreach ($dir in $links) {
+            $pyverifyWheel = Find-PinnedWheel $dir $pinSha
+            if ($pyverifyWheel) { break }
+        }
+    }
+    if (-not $pyverifyWheel) {
+        if ($Offline) {
+            Fail "no mps3_pyverify wheel with sha256 $pinSha (version $pinVersion) in $Offline. Make the wheelhouse again with scripts/make_wheelhouse.sh."
+        }
+        $dest = Join-Path $Work ('mps3_pyverify-' + $pinVersion + '-py3-none-any.whl')
+        try { Invoke-WebRequest -UseBasicParsing -Uri $pinUrl -OutFile $dest }
+        catch {
+            Remove-Item -Force -ErrorAction SilentlyContinue $dest
+            Fail "could not download the pinned pyverify wheel from $pinUrl. Nothing was installed. If the release is not published yet, or you have no network, use a wheelhouse (-Offline DIR); expected sha256 $pinSha"
+        }
+        $got = (Get-FileHash -Algorithm SHA256 -Path $dest).Hash.ToLower()
+        if ($got -ne $pinSha) {
+            Remove-Item -Force -ErrorAction SilentlyContinue $dest
+            Fail "the pyverify wheel downloaded from $pinUrl has sha256 $got, but pyverify.pin says $pinSha. It was NOT installed."
+        }
+        $pyverifyWheel = $dest
+    }
 
     $extras = @()
     if ($WithApp) { $extras += 'app' }
@@ -548,7 +595,7 @@ try {
     if ($Offline) { Say "offline  only from $Offline (no package index)" }
     if ($uv) {
         $pipBase = @('pip', 'install', '--quiet') + $uvFlags + @('--python', $VenvPy)
-        # pyverify keeps its version number across commits: always reinstall the vendored one.
+        # pyverify keeps its version number across commits: always reinstall the pinned one.
         $r = Invoke-Native $uv ($pipBase + @('--reinstall-package', 'mps3-pyverify', '--no-deps', $pyverifyWheel))
         if ($r.Code -ne 0) { Fail "could not install $pyverifyWheel" }
         # --upgrade-package, not --upgrade: an upgrade of everything could swap the vendored

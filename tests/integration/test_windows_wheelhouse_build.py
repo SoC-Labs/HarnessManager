@@ -3,6 +3,7 @@ real pip, against a fake index (``--no-index --find-links``): the network is nev
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -34,8 +35,11 @@ def test_a_windows_wheelhouse_from_linux_with_the_real_pip(tmp_path):
     assert "uv-0.5.0-py3-none-win_amd64.whl" in names and "fakeserial-1.0-py3-none-any.whl" in names
     assert not any(n.startswith(("fakemaconly", "fakedev", "fakeold")) for n in names)
     assert {"harness_manager-9.0.0-py3-none-any.whl", "constraints.txt", "install.ps1",
-            "install.sh", "SHA256SUMS"} <= set(names)
-    assert any(n.startswith("mps3_pyverify-") for n in names)
+            "install.sh", "SHA256SUMS", "pyverify.pin", "pyverify_pin.sh"} <= set(names)
+    pinned = {ln.split("=", 1)[0]: ln.split("=", 1)[1]
+              for ln in (out / "pyverify.pin").read_text().splitlines() if "=" in ln and ln[0] != "#"}
+    pyv = [n for n in names if n.startswith("mps3_pyverify-")]
+    assert len(pyv) == 1 and hashlib.sha256((out / pyv[0]).read_bytes()).hexdigest() == pinned["sha256"]
     sums = (out / "SHA256SUMS").read_text()
     assert "install.ps1" in sums and "fakewinonly-1.0-cp312-cp312-win_amd64.whl" in sums
     assert "win_amd64, Python 3.12" in res.stdout and "install.ps1 -Offline" in res.stdout

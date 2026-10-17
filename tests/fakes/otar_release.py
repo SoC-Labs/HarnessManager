@@ -8,6 +8,7 @@ are written by fakes, and ``gh`` is never run (a test that needs it records the 
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -70,7 +71,11 @@ def make_repo(root: Path, version: str = "0.2.0", *, changelog_version: str | No
         "## 0.1.0\n\n- The first release.\n", encoding="utf-8")
     (root / "constraints.txt").write_text("cryptography==50.0.1\n", encoding="utf-8")
     (root / "vendor").mkdir(exist_ok=True)
-    (root / "vendor" / PYVERIFY_WHEEL).write_bytes(fake_wheel_bytes("0.1.0", "mps3-pyverify"))
+    dep = fake_wheel_bytes("0.1.0", "mps3-pyverify")
+    (root / "vendor" / PYVERIFY_WHEEL).write_bytes(dep)
+    (root / "pyverify.pin").write_text(
+        f"version=0.1.0\nsha256={hashlib.sha256(dep).hexdigest()}\n"
+        "url=https://example.invalid/mps3_pyverify-0.1.0-py3-none-any.whl\n", encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"release {version}")

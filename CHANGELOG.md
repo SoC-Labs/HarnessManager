@@ -4,6 +4,10 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
+## 1.2.1 (unreleased)
+
+- Install: Harness Manager now installs the platform's published pyverify wheel, named by exact version and sha256 in `pyverify.pin`, instead of a copy kept in the repository. The installer checks the sha256 and stops, naming the url and both hashes, if it differs or the download fails; a wheelhouse (`--offline`) still installs with no network.
+
 ## 1.2.0 (unreleased)
 
 Support for boards that run a mint-4 release (v2.2 and later), and a round of fixes and plainer
