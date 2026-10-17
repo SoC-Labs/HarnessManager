@@ -401,8 +401,8 @@ function BundleFacts({ chk }) {
 // How the bundle's sha256 is made, so it can be checked on another machine.
 function shaHow(chk) {
   const u = chk.unsigned || {};
-  if (u.of === "zip") return html`of the zip file itself (<span class="mono">${u.how || "sha256sum BUNDLE.zip"}</span>)`;
-  return html`of the folder's manifest: one line <span class="mono">${"<sha256>  <path>"}</span> for each of its ${u.files} files, sorted by path (<span class="mono">${u.how || ""}</span>)`;
+  if (u.of === "zip") return html`of the zip file itself (<span class="mono">${u.how || "sha256sum BUNDLE.zip"}</span>; on a Mac: <span class="mono">${u.how_macos || "shasum -a 256 BUNDLE.zip"}</span>)`;
+  return html`of the folder's manifest: one line <span class="mono">${"<sha256>  <path>"}</span> for each of its ${u.files} files, sorted by path (<span class="mono">${u.how || ""}</span>; on a Mac: <span class="mono">${u.how_macos || ""}</span>)`;
 }
 
 function UnsignedBanner() {
@@ -917,7 +917,7 @@ function ImageCheck({ bid, w }) {
     ${c ? html`<div class="bu-check" data-testid="bu-card-check"><dl class="kv">
       <dt>Image</dt><dd><span class="mono">${c.source}</span><div class="sub">${(c.card && c.card.describe) || ""}</div></dd>
       <dt>sha256</dt><dd data-testid="bu-card-sha"><span class="mono bu-sha">${u.sha256}</span>
-        <div class="sub">of the image file itself (<span class="mono">${u.how || "sha256sum CARD.img"}</span>)</div></dd>
+        <div class="sub">of the image file itself (<span class="mono">${u.how || "sha256sum CARD.img"}</span>; on a Mac: <span class="mono">${u.how_macos || "shasum -a 256 CARD.img"}</span>)</div></dd>
     </dl></div>
     <div class="field bu-unsigned-field"><label for=${`bu-os-unsigned-${bid}`}>Type <code data-testid="bu-os-unsigned-want">${u.phrase}</code></label>
       <input id=${`bu-os-unsigned-${bid}`} class="input mono grow" data-testid="bu-os-unsigned-phrase" autocomplete="off" spellcheck="false"

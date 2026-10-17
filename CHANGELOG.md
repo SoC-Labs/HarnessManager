@@ -4,6 +4,14 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
+## 1.2.1 (unreleased)
+
+### Fixes
+
+- The "check the checksum yourself" commands for an unsigned bundle, folder or card image now
+  also come in a macOS form (`shasum -a 256`, BSD `find`) that prints the same sha256; the app,
+  the command line and `error.data.unsigned.how_macos` show both.
+
 ## 1.2.0 (unreleased)
 
 Support for boards that run a mint-4 release (v2.2 and later), and a round of fixes and plainer

@@ -245,10 +245,11 @@ def _unsigned(ctx: Any, chk: Any) -> None:
     info = chk.unsigned() or {}
     ctx.note(bringup.UNSIGNED_BANNER)
     if chk.sha256_of == "zip":
-        ctx.note(f"sha256   {chk.sha256}  (the zip: {bringup.ZIP_RECIPE})")
+        ctx.note(f"sha256   {chk.sha256}  (the zip: {bringup.ZIP_RECIPE}; macOS: "
+                 f"{bringup.ZIP_RECIPE_MACOS})")
     else:
         ctx.note(f"sha256   {chk.sha256}  (its manifest of {chk.manifest_files} files: "
-                 f"{bringup.MANIFEST_RECIPE})")
+                 f"{bringup.MANIFEST_RECIPE}; macOS: {bringup.MANIFEST_RECIPE_MACOS})")
     if a.confirm_unsigned is not None:
         typed = a.confirm_unsigned
     elif a.yes:
