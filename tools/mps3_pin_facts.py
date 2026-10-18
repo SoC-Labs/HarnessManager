@@ -301,21 +301,32 @@ SHELL_PBLOCK: dict[str, list[dict[str, Any]]] = {
          "cite": ("fielded/0x44EE76D5/README.md",
                   "**`dut_clk` enters the partition from `BUFGCE_X2Y47`.**")},
     ],
-    # v2.2 / mint 4 (shape A, 20 clock regions). Facts the platform repo does not state for
-    # the new partition are DROPPED (``drop``), never carried over from the old box:
-    # slice_range (no measured SLICE bounding box), reference_use (its denominators were the
-    # old 42,824 LUT), dut_clk_hd_clk_src (the mint-4 CLKCTL BUFGCE site is not recorded).
+    # v2.2 / mint 4 (shape A, 20 clock regions). Capacity is AFTER snapping, from the mint-4
+    # trial's report_utilization -pblocks (the "Available" column of util_rm_greybox.rpt).
+    # The site ranges are the bounding boxes dfx_floorplan.xdc computes at run time (it holds
+    # no literal ranges): they come from the mint-4 lead, and are consistent with the
+    # report's 720 RAMB36 (12 x 60), 1,440 RAMB18 and 2,160 DSP (18 x 120). reference_use is
+    # from the mint build's own prod/util_rm_nanosoc.rpt, which is NOT in git at the ref.
     "0xA5856D30": [
         {"key": "clock_regions",
          "value": [f"X{x}Y{y}" for y in range(5) for x in range(4)],
          "cite": ("fpga/dfx/dfx_floorplan.xdc", "set rp_regions {X0Y0 X1Y0 X2Y0 X3Y0  X0Y1")},
-        {"key": "capacity", "value": {"LUT": 214080, "FF": 428160, "CLB": 26760, "DSP": 2160},
-         "cite": ("fpga/dfx/dfx_floorplan.xdc", "26,760 SLICE = 214,080 LUT, 720 RAMB36, 2160 DSP")},
+        {"key": "slice_range", "value": "SLICE_X0Y0:SLICE_X95Y299",
+         "cite": ("fpga/dfx/dfx_floorplan.xdc", "foreach site_type {SLICE DSP48E2 RAMB18 RAMB36} {")},
+        {"key": "ramb36_range", "value": "RAMB36_X0Y0:RAMB36_X11Y59",
+         "cite": ("fpga/dfx/dfx_floorplan.xdc", "foreach site_type {SLICE DSP48E2 RAMB18 RAMB36} {")},
+        {"key": "ramb18_range", "value": "RAMB18_X0Y0:RAMB18_X11Y119",
+         "cite": ("fpga/dfx/dfx_floorplan.xdc", "foreach site_type {SLICE DSP48E2 RAMB18 RAMB36} {")},
+        {"key": "dsp48e2_range", "value": "DSP48E2_X0Y0:DSP48E2_X17Y119",
+         "cite": ("fpga/dfx/dfx_floorplan.xdc", "foreach site_type {SLICE DSP48E2 RAMB18 RAMB36} {")},
+        {"key": "capacity", "value": {"LUT": 213456, "FF": 426912, "DSP": 2160},
+         "cite": ("docs/evidence/2026-10-mint4a-shapeA/util_rm_greybox.rpt", "624 |    213456 |")},
         {"key": "bram_tiles", "value": 720,
-         "cite": ("fpga/dfx/dfx_floorplan.xdc", "26,760 SLICE = 214,080 LUT, 720 RAMB36, 2160 DSP")},
-        {"key": "slice_range", "drop": True},
-        {"key": "reference_use", "drop": True},
-        {"key": "dut_clk_hd_clk_src", "drop": True},
+         "cite": ("docs/evidence/2026-10-mint4a-shapeA/util_rm_greybox.rpt", "|       720 |  0.00 |")},
+        {"key": "reference_use",
+         "value": "rm_nanosoc: 11,319 LUT (5.30%), 6,353 FF (1.49%), 21.5 BRAM tiles (2.99%), 3 DSP (0.14%), "
+                  "routed, from the mint build's prod/util_rm_nanosoc.rpt (not in git)",
+         "cite": ("fielded/0xA5856D30/mint.json", '"rm_key": "rm_nanosoc"')},
     ],
 }
 

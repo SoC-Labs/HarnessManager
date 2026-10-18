@@ -25,6 +25,8 @@ create_clock -name dbg_bscan_tck -period 80.000 -waveform {0.000 40.000} [get_po
 create_clock -name dbg_bscan_drck -period 80.000 -waveform {0.000 40.000} [get_ports dbg_bscan_drck]
 # jtag_tck: OOC-only; no static counterpart
 create_clock -name jtag_tck -period 100.000 -waveform {0.000 50.000} [get_ports jtag_tck]
+# the static's clock buffer that drives dut_clk into the partition
+set_property HD.CLK_SRC BUFGCE_X2Y24 [get_ports -quiet dut_clk]
 
 # --- every boundary clock is asynchronous to the others (the static owns the CDC) ---
 set_clock_groups -name async_nanosoc -asynchronous \

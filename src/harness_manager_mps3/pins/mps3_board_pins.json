@@ -264,6 +264,18 @@
   },
   "nanosoc_ooc_xdc": {
    "repo": "mps3-nanosoc-platform",
+   "ref": "89a8dcdfceed21d63785404f4fb1633e707e40e4",
+   "commit": "89a8dcdfceed21d63785404f4fb1633e707e40e4",
+   "path": "fpga/rp/nanosoc/nanosoc_ooc.xdc",
+   "role": "cited prose",
+   "sha256": "242fcc42778c2c05603739588091566f5cf542aaf4d41f144a25740959927195",
+   "last_changed": {
+    "commit": "514b92b25f754dcb0fc761597533c3d46bf054a2",
+    "date": "2026-10-13"
+   }
+  },
+  "nanosoc_ooc_xdc@0x72BB0A36": {
+   "repo": "mps3-nanosoc-platform",
    "ref": "feat/rm-ila-mint",
    "commit": "e54363022f896c2589b9277e5867d402923e3b9a",
    "path": "fpga/rp/nanosoc/nanosoc_ooc.xdc",
@@ -558,6 +570,18 @@
     "date": "2026-09-23"
    },
    "fielded_static_input": true
+  },
+  "util_rm_greybox_rpt": {
+   "repo": "mps3-nanosoc-platform",
+   "ref": "89a8dcdfceed21d63785404f4fb1633e707e40e4",
+   "commit": "89a8dcdfceed21d63785404f4fb1633e707e40e4",
+   "path": "docs/evidence/2026-10-mint4a-shapeA/util_rm_greybox.rpt",
+   "role": "cited prose",
+   "sha256": "5406f56900a3d393ce9c75a39bc4228554b9a8ee409f80dc5e5d921f63cc0036",
+   "last_changed": {
+    "commit": "2d000082f04bb6c08ee888c4d456447daac6d702",
+    "date": "2026-10-13"
+   }
   },
   "xilinx_pkg": {
    "path": "/apps/Xilinx/Vivado/2024.1/data/parts/xilinx/kintexu/public/ibis/pkg/xcku115_flvb1760.pkg",
@@ -12010,6 +12034,10 @@
      ],
      "src": "dfx_floorplan_xdc:88"
     },
+    "slice_range": {
+     "value": "SLICE_X0Y0:SLICE_X95Y299",
+     "src": "dfx_floorplan_xdc:88"
+    },
     "snapping_mode": {
      "value": "ON",
      "src": "dfx_floorplan_xdc:178"
@@ -12020,16 +12048,19 @@
     },
     "capacity": {
      "value": {
-      "LUT": 214080,
-      "FF": 428160,
-      "CLB": 26760,
+      "LUT": 213456,
+      "FF": 426912,
       "DSP": 2160
      },
-     "src": "dfx_floorplan_xdc:83"
+     "src": "util_rm_greybox_rpt:81"
     },
     "bram_tiles": {
      "value": 720,
-     "src": "dfx_floorplan_xdc:83"
+     "src": "util_rm_greybox_rpt:152"
+    },
+    "reference_use": {
+     "value": "rm_nanosoc: 11,319 LUT (5.30%), 6,353 FF (1.49%), 21.5 BRAM tiles (2.99%), 3 DSP (0.14%), routed, from the mint build's prod/util_rm_nanosoc.rpt (not in git)",
+     "src": "mint_record:270"
     },
     "io_sites": {
      "value": 0,
@@ -12039,9 +12070,25 @@
      "value": "no BUFG, BSCAN or IOB site: the RM may hold no clock buffer, BSCANE2 or pad",
      "src": "handover_rm_ila_over_xvc_md:65"
     },
+    "dut_clk_hd_clk_src": {
+     "value": "BUFGCE_X2Y24",
+     "src": "nanosoc_ooc_xdc:71"
+    },
     "icap": {
      "value": "CONFIG_SITE_X0Y0 (clock region X5Y1, SLR0)",
      "src": "dryrun_slr_txt:8"
+    },
+    "ramb36_range": {
+     "value": "RAMB36_X0Y0:RAMB36_X11Y59",
+     "src": "dfx_floorplan_xdc:88"
+    },
+    "ramb18_range": {
+     "value": "RAMB18_X0Y0:RAMB18_X11Y119",
+     "src": "dfx_floorplan_xdc:88"
+    },
+    "dsp48e2_range": {
+     "value": "DSP48E2_X0Y0:DSP48E2_X17Y119",
+     "src": "dfx_floorplan_xdc:88"
     }
    },
    "notes": [
@@ -15055,7 +15102,7 @@
     },
     "dut_clk_hd_clk_src": {
      "value": "BUFGCE_X2Y24",
-     "src": "nanosoc_ooc_xdc:72"
+     "src": "nanosoc_ooc_xdc@0x72BB0A36:72"
     },
     "icap": {
      "value": "CONFIG_SITE_X0Y0 (clock region X5Y1, SLR0)",
