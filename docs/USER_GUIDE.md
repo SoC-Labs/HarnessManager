@@ -961,7 +961,7 @@ next, blocked, failed or unchecked) and what to do next:
 
 | Step | What it checks |
 |---|---|
-| 1 Target | the board's static and partition (47 ports, 148 bits on 0x72BB0A36) |
+| 1 Target | the board's static and partition (54 ports, 260 bits on the v2.2 static 0xA5856D30; 47 ports, 148 bits on earlier statics) |
 | 2 Tools | the Vivado release the kit needs, and the one found here |
 | 3 Kit | the static's build kit is in the cache and its CRC matches the static id |
 | 4 Wrapper and XDC | your design passes the XDC checks; its rm_id |
