@@ -1143,8 +1143,11 @@ class RemoteDebug:
     def detect(self, session: BoardSession) -> str:
         return str(self._engine._http.post(f"/boards/{q(_bid(session))}/debug/detect")["idcode"])
 
-    def up(self, session: BoardSession) -> DebugStatus:
-        return from_json(DebugStatus, self._engine.run_job(f"/boards/{q(_bid(session))}/debug/up"))
+    def up(self, session: BoardSession, *, via: str = "jtag") -> DebugStatus:
+        # HM 1.2.1: no body for JTAG (an older daemon is asked as before)
+        body = {"via": via} if via != "jtag" else None
+        return from_json(DebugStatus,
+                         self._engine.run_job(f"/boards/{q(_bid(session))}/debug/up", body))
 
     def down(self, session: BoardSession) -> DebugStatus:
         return from_json(DebugStatus,

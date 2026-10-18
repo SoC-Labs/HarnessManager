@@ -15,6 +15,11 @@ key, batch mode), then plays the launcher as the Linux lead's contract has it:
 - ``version``: the status-shaped object, plus ``capabilities`` when set (FIX-PACK-7: v2.1's
   ``harnessd-lock``);
 - ``status``: the state, or the watchdog's stop after a swap (``swap_stop``);
+- ``up --via hostio`` (HM 1.2.1; contract ``hio_debug_json.md``): ``via``/``capabilities``/
+  ``gdb_init`` appended to every reply (``legacy=True``: an older board, none of them), one
+  core, cfg ``nanosoc_mps3_hostio4.cfg``, adapter ``hostio4``, ``tap`` null; the refusals in
+  the contract (``hostio_refusal = (rc, code, message, hint, busy)`` plays any of them;
+  ``no_hostio`` for a design without it, ``busy`` for the other via);
 - ``installed=False``: exit 127 (``sh: mps3-debug: not found``); ``malformed`` (True, or the
   verbs it applies to): exit 0 and text that is not its JSON.
 
@@ -40,9 +45,17 @@ DESIGNS: dict[int, tuple[str, tuple[str, ...] | None]] = {
     0x0000: ("greybox", None), 0x0001: ("nanosoc", ("cpu0",)),
     0x0003: ("nanosoc_multicore", ("cpu0", "cpu1")), 0x0005: ("nanosoc_upy", ("cpu0",)),
     0x0008: ("nanosoc_iice", ("cpu0",)), 0x001E: ("led", None),
+    0x0042: ("jtag_only", ("cpu0",)),               # a DAP but no hostio4 link (HM 1.2.1)
 }
+#: designs whose hostio4 link reaches an ADP (``hostio=yes`` in the board's designs.conf)
+HOSTIO_DESIGNS = frozenset({"nanosoc", "nanosoc_multicore", "nanosoc_upy", "nanosoc_iice"})
+JTAG_CAPS = ["mem_read", "mem_write", "load", "halt", "step", "breakpoints", "registers",
+             "reset"]
+HOSTIO_CAPS = ["mem_read", "mem_write", "load"]
+HOSTIO_INIT = ["set remote p-packet off", "set remote P-packet off"]
 GDB_PORTS = (3333, 3334)
 IDCODE = "0x6ba00477"
+DESIGNS_BY_NAME = {n: c for n, c in DESIGNS.values()}
 
 
 class _GdbServer:
@@ -116,6 +129,15 @@ class FakeLauncher:
         self.capabilities: list[str] | None = None
         #: the launcher's state when each verb arrived ([(verb, state)]): what a swap met
         self.states: list[tuple[str, str]] = []
+        #: HM 1.2.1: the next hostio ``up`` refuses with (rc, code, message, hint, busy)
+        self.hostio_refusal: tuple[int, str, str, str, dict[str, str] | None] | None = None
+        #: an older board: no ``via`` / ``capabilities`` / ``gdb_init`` in any reply
+        self.legacy = False
+        self.via = "jtag"
+        self.hostio_designs = set(HOSTIO_DESIGNS)       # designs with hostio=yes
+        #: called as ``during(words)`` while each launcher call runs (a test's probe)
+        self.during: Any = None
+        self.asked_via = "jtag"
         self.state = "down"
         self.design = ""
         self.cores: tuple[str, ...] = ()
@@ -154,6 +176,8 @@ class FakeLauncher:
         self.argvs.append(argv)
         words = shlex.split(argv[-1])
         self.calls.append(words)
+        if self.during is not None:
+            self.during(words)
         if self.ssh_fails:
             return RunResult(255, "", f"ssh: connect to host {self.board_ip or 'board'} port 22: "
                                       "Connection timed out\r\n")
@@ -165,6 +189,7 @@ class FakeLauncher:
         if self.malformed is True or (self.malformed and verb in self.malformed):
             return RunResult(0, "mps3-debug: usage: mps3-debug up|down|status\n{not json", "")
         rm = words[words.index("--rm") + 1] if "--rm" in words else "auto"
+        self.asked_via = words[words.index("--via") + 1] if "--via" in words else "jtag"
         self.states.append((verb, self.state))
         return getattr(self, f"_{verb}", self._unknown)(rm)
 
@@ -182,6 +207,16 @@ class FakeLauncher:
         }
         if self.state == "up":
             body["cfg"] = ["interface/mps3_jtagbb.cfg", f"target/{self.design}.cfg"]
+            if self.via == "hostio":
+                body["cfg"] = ["nanosoc_mps3_hostio4.cfg"]
+                body["openocd"] = {"version": "0.12.0+mps3 (test)", "adapter": "hostio4"}
+                body["tap"] = None
+                body["cores"] = [{"name": "cpu0", "gdb_port": GDB_PORTS[0]}]
+        if not self.legacy:                              # the three appended keys, last
+            hostio = self.via == "hostio"
+            body["via"] = self.via
+            body["capabilities"] = HOSTIO_CAPS if hostio else JTAG_CAPS
+            body["gdb_init"] = HOSTIO_INIT if hostio else []
         body.update(kw)
         return RunResult(rc, "Linux mps3 6.6.0 (a banner line)\n" + json.dumps(body) + "\n", "")
 
@@ -192,7 +227,36 @@ class FakeLauncher:
         finally:
             self.state = state if state == "up" else "down"
 
+    def _refuse_hostio(self, rc: int, code: str, message: str, hint: str = "",
+                       busy: dict[str, str] | None = None) -> RunResult:
+        """A refusal of ``up --via hostio``: ``via`` is the one asked for; down."""
+        keep, self.via = self.via, "hostio"
+        try:
+            return self._failed(rc, code, message, hint, **({"busy": busy} if busy else {}))
+        finally:
+            self.via = keep
+
     def _up(self, rm: str) -> RunResult:
+        want = self.asked_via
+        if self.state == "up" and want != self.via:
+            other = "JTAG" if self.via == "jtag" else "hostio"
+            keep = self.state
+            res = self._reply(4, error={"code": "busy", "hint": "mps3-debug down, then up again",
+                                        "message": f"a {other} debug session is up (via "
+                                                   f"{self.via}): one via at a time"},
+                              busy={"by": f"mps3-debug via {self.via}", "peer": None})
+            self.state = keep
+            return res
+        if want == "hostio" and self.state != "up":
+            if self.hostio_refusal is not None:
+                return self._refuse_hostio(*self.hostio_refusal)
+            name = (DESIGNS.get(self.rm_id & 0xFFFF) or ("", None))[0] if rm == "auto" else rm
+            if name and name not in self.hostio_designs and DESIGNS_BY_NAME.get(name, ((),))[0]:
+                self.design = name
+                return self._refuse_hostio(
+                    13, "no_hostio", f"the design {name} has no hostio4 debug path (no ADP on "
+                                     "the hostio4 link)",
+                    "use the JTAG path (mps3-debug up), or load a nanoSoC-family design")
         if self.state == "up":
             return self._reply(0, already=True)
         if not self.openocd:
@@ -217,6 +281,7 @@ class FakeLauncher:
             return self._failed(6, "openocd_exit", "openocd exited during init (exit 1)",
                                 log_tail=tail)
         self._next_pid += 1
+        self.via = want
         self.state, self.design, self.cores, self.pid = "up", name, cores, self._next_pid
         self.swap_stop, self.died = False, ""
         return self._reply(0)
@@ -243,9 +308,14 @@ class FakeLauncher:
         return self._reply(0)
 
     def _version(self, _rm: str) -> RunResult:
+        extra: dict[str, Any] = {}
+        if not self.legacy:                      # HM 1.2.1: each design says if it has hostio
+            extra["designs"] = [{"name": n, "hostio": n in self.hostio_designs}
+                                for n, _c in DESIGNS.values()]
         if self.capabilities is not None:
-            return self._reply(0, launcher="2.1.0", capabilities=list(self.capabilities))
-        return self._reply(0)
+            return self._reply(0, launcher="2.1.0", capabilities=list(self.capabilities),
+                               **extra)
+        return self._reply(0, **extra)
 
     def _unknown(self, _rm: str) -> RunResult:
         return RunResult(2, "", "mps3-debug: unknown verb\n")

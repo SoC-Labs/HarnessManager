@@ -353,11 +353,13 @@ def _export(ctx: Ctx, board_id: str, session) -> int:
 # --- debug --------------------------------------------------------------------------------
 
 
-def _gdb_command(gdb_port: int) -> str:
-    """``services.debug.gdb_command`` (imported here: the other verbs never load it)."""
+def _gdb_command(gdb_port: int, st: DebugStatus | None = None) -> str:
+    """``services.debug.gdb_command`` (imported here: the other verbs never load it). A
+    hostio session's line also sends its ``gdb_init`` (the two p-packet commands)."""
     from harness_manager.services.debug import gdb_command
 
-    return gdb_command(gdb_port, EXPORT_HOST)
+    return gdb_command(gdb_port, EXPORT_HOST,
+                       gdb_init=tuple(getattr(st, "gdb_init", ()) or ()))
 
 
 def _gdb_ports(st: DebugStatus) -> list[tuple[str, int]]:
@@ -370,7 +372,7 @@ def _gdb_ports(st: DebugStatus) -> list[tuple[str, int]]:
 
 def _gdb_commands(st: DebugStatus) -> list[dict[str, Any]]:
     """The JSON's ``gdb_commands``: one ``{core, gdb_port, command}`` per core."""
-    return [{"core": core, "gdb_port": port, "command": _gdb_command(port)}
+    return [{"core": core, "gdb_port": port, "command": _gdb_command(port, st)}
             for core, port in _gdb_ports(st)]
 
 
@@ -383,7 +385,8 @@ def _status_row(board_id: str, st: DebugStatus) -> list:
     return [board_id, st.state, st.gdb_port or "", st.telnet_port or "", st.tcl_port or "",
             st.pid or "", list(st.config), st.detail,
             getattr(st, "where", "host"), [p for _c, p in _gdb_ports(st)],   # +DEBUG-ONBOARD
-            [c for c, _p in _gdb_ports(st)]]
+            [c for c, _p in _gdb_ports(st)],
+            getattr(st, "via", "jtag"), list(getattr(st, "capabilities", ()))]  # +HM 1.2.1
 
 
 def _status_human(board_id: str, st: DebugStatus) -> list[str]:
@@ -391,6 +394,14 @@ def _status_human(board_id: str, st: DebugStatus) -> list[str]:
     where = getattr(st, "where", "host")
     if where == "board" or st.state in ("up", "starting"):
         lines.append(f"where      {WHERE_WORDS.get(where, where)}")
+    via = getattr(st, "via", "jtag")
+    if st.state in ("up", "starting"):          # HM 1.2.1: how the DUT is reached
+        lines.append(f"via        {via}" + (" (memory and load only)" if via == "hostio" else ""))
+        lines.append("can        " + " ".join(getattr(st, "capabilities", ())))
+        if via == "hostio":
+            from harness_manager.services.debug_onboard import HOSTIO_LIMITS
+
+            lines.append(f"limits     {HOSTIO_LIMITS}")
     cores = _gdb_ports(st)
     for core, port in cores:                    # one per core; a lone core stays unnamed
         lines.append(f"gdb        {EXPORT_HOST}:{port}" + (f"  {core}" if len(cores) > 1 else ""))
@@ -399,7 +410,7 @@ def _status_human(board_id: str, st: DebugStatus) -> list[str]:
     if st.tcl_port:
         lines.append(f"tcl        {EXPORT_HOST}:{st.tcl_port}")
     for _core, port in cores:                   # the line to paste, per core (FIX-PACK-5)
-        lines.append(f"attach     {_gdb_command(port)}")
+        lines.append(f"attach     {_gdb_command(port, st)}")
     if st.config:
         lines.append(f"config     {' '.join(st.config)}")
     if st.pid:
@@ -430,13 +441,18 @@ def _status_of_event(d: dict[str, Any]) -> DebugStatus:
     """A ``debug.state`` event's data as the ``DebugStatus`` it reports (its ports, cores and
     where), for the same lines ``debug up`` printed first."""
     ports = d.get("ports") if isinstance(d.get("ports"), dict) else {}
+    extra: dict[str, Any] = {}
+    if isinstance(d.get("capabilities"), list):
+        extra["capabilities"] = tuple(str(c) for c in d["capabilities"])
     return DebugStatus(
         state=str(d.get("state") or ""), gdb_port=_num(ports.get("gdb")),
         telnet_port=_num(ports.get("telnet")), tcl_port=_num(ports.get("tcl")),
         config=tuple(str(c) for c in d.get("config") or ()), pid=_num(d.get("pid")),
         detail=str(d.get("detail") or ""),
         gdb_ports=tuple(p for p in (_num(x) for x in d.get("gdb_ports") or ()) if p),
-        cores=tuple(str(c) for c in d.get("cores") or ()), where=str(d.get("where") or "host"))
+        cores=tuple(str(c) for c in d.get("cores") or ()), where=str(d.get("where") or "host"),
+        via=str(d.get("via") or "jtag"),
+        gdb_init=tuple(str(c) for c in d.get("gdb_init") or ()), **extra)
 
 
 def _closed_for_swap(detail: str) -> bool:
@@ -512,7 +528,10 @@ def cmd_debug(ctx: Ctx) -> int:
                             rows=[[cand.board_id, idcode]],
                             human=[f"idcode     {idcode}"]))
             return ExitCode.OK
-        st = {"up": svc.up, "down": svc.down, "status": svc.status}[action](session)
+        if action == "up" and getattr(a, "debug_via", "jtag") != "jtag":
+            st = svc.up(session, via=a.debug_via)          # HM 1.2.1: a JTAG up is called as before
+        else:
+            st = {"up": svc.up, "down": svc.down, "status": svc.status}[action](session)
         if action == "up" and st.state == "failed":
             raise with_data(ActionFailedError(
                 f"the debug server for {cand.board_id} failed to start: "
@@ -520,7 +539,7 @@ def cmd_debug(ctx: Ctx) -> int:
                 hint="`harness-manager debug status TARGET` shows the last state"), status=st)
         data: dict[str, Any] = {"board_id": cand.board_id, "status": st}
         if st.gdb_port:                                 # FIX-PACK-5: the line to paste
-            data["gdb_command"] = _gdb_command(st.gdb_port)
+            data["gdb_command"] = _gdb_command(st.gdb_port, st)
             data["gdb_commands"] = _gdb_commands(st)    # DEBUG-ONBOARD: one per core
         human = _status_human(cand.board_id, st)
         report = getattr(svc, "openocd_report", None)

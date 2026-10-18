@@ -80,6 +80,18 @@ def _for_arg(p: argparse.ArgumentParser, what: str) -> None:
                    help=f"{what} for this long, then stop (default: until Ctrl-C)")
 
 
+def split_debug_via(args: argparse.Namespace) -> None:
+    """``debug up TARGET --via hostio`` (HM 1.2.1): ``--via`` already names the board's route
+    (``ssh:HOST`` or ``hub``), and neither of those is ``jtag`` or ``hostio``, so on ``debug up``
+    those two words are the debug path: moved to ``args.debug_via``, the route left unset."""
+    if getattr(args, "debug_cmd", "") != "up":
+        return
+    via = getattr(args, "via", "") or ""
+    args.debug_via = via if via in ("jtag", "hostio") else "jtag"
+    if via in ("jtag", "hostio"):
+        del args.via
+
+
 def make_parser() -> argparse.ArgumentParser:
     fmt, usb = _fmt_parent(), _usb_parent()
     p = _Parser(prog="harness-manager", description="SoC Labs Harness Manager",
@@ -197,7 +209,9 @@ def make_parser() -> argparse.ArgumentParser:
     vp = verb("debug", "OpenOCD debug server for the loaded design", parents=(fmt,))
     dsub = vp.add_subparsers(dest="debug_cmd", required=True, metavar="ACTION")
     for action, help_, layout in (
-        ("up", "start the server and hold it until Ctrl-C", "debug up|down|status"),
+        ("up", "start the server and hold it until Ctrl-C (--via hostio is a preview in 1.2.1: "
+               "memory read/write and image load over the DUT's hostio pins; --via jtag is the "
+               "default)", "debug up|down|status"),
         ("down", "stop the server", "debug up|down|status"),
         ("status", "state, ports, config, pid", "debug up|down|status"),
         ("detect", "non-intrusive: the TAP IDCODE", "debug detect"),
@@ -473,6 +487,7 @@ def _format(args: argparse.Namespace) -> str:
 
 
 def _normalise(args: argparse.Namespace) -> None:
+    split_debug_via(args)
     if getattr(args, "cmd", "") == "mcc" and getattr(args, "mcc_cmd", "") == "cmd":
         args.line = " ".join(args.words)
 

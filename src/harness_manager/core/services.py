@@ -137,6 +137,14 @@ class DebugStatus:
     gdb_ports: tuple[int, ...] = ()
     cores: tuple[str, ...] = ()
     where: str = "host"           # "host" | "board"
+    #: HM 1.2.1 (additive, appended): how the session reaches the DUT. ``"jtag"`` (the
+    #: default, every older reply) or ``"hostio"`` (memory and load only). ``capabilities`` is
+    #: what its gdb can do (the full JTAG set when the launcher says nothing); ``gdb_init``
+    #: the gdb commands a client sends before ``target extended-remote``.
+    via: str = "jtag"
+    capabilities: tuple[str, ...] = (
+        "mem_read", "mem_write", "load", "halt", "step", "breakpoints", "registers", "reset")
+    gdb_init: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         ports = tuple(int(p) for p in self.gdb_ports if p)
@@ -149,6 +157,8 @@ class DebugStatus:
         if len(cores) < len(ports):
             cores += tuple(f"cpu{i}" for i in range(len(cores), len(ports)))
         object.__setattr__(self, "cores", cores)
+        object.__setattr__(self, "capabilities", tuple(str(c) for c in self.capabilities))
+        object.__setattr__(self, "gdb_init", tuple(str(c) for c in self.gdb_init))
 
 
 @runtime_checkable
@@ -157,7 +167,11 @@ class DebugService(Protocol):
         """Non-intrusive: the TAP IDCODE ("0x6ba00477"), or ``NothingOnTargetError``."""
         ...
 
-    def up(self, session: BoardSession) -> DebugStatus: ...
+    def up(self, session: BoardSession) -> DebugStatus:
+        """Start the server. A service that offers the hostio path (HM 1.2.1) also takes a
+        keyword ``via="jtag"|"hostio"``; callers pass it only when it is not ``"jtag"``."""
+        ...
+
     def down(self, session: BoardSession) -> DebugStatus: ...
     def status(self, session: BoardSession) -> DebugStatus: ...
 

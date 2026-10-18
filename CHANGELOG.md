@@ -6,6 +6,10 @@ API (docs/API.md says what changed).
 
 ## 1.2.1 (unreleased)
 
+### New
+
+- **Debug via hostio (preview).** On a claimed Linux board, `debug up TARGET --via hostio` (the app: Debug, **hostio (memory only, preview)**) debugs over the DUT's hostio pins: memory read/write and image load, with no halt, step, registers or breakpoints (those need JTAG, the default). It is refused with a plain reason, before anything is sent, unless the board is claimed and the DUT's pins are in hostio4 mode; `debug status` and the API show `via` and `capabilities`, and the gdb `attach` line carries the two `set remote p-packet off` / `set remote P-packet off` commands hostio needs. A preview in 1.2.1: it depends on the platform's v2.2.1 board software.
+
 ### Fixes
 
 - The "check the checksum yourself" commands for an unsigned bundle, folder or card image now

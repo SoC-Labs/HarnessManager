@@ -61,6 +61,7 @@ that route (``Mps3OnBoard``) to the debug service, which picks it by ``debug.on_
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shlex
 from dataclasses import dataclass
@@ -88,6 +89,8 @@ from .constants import (
     OPENOCD_CFG_DIR,
 )
 
+#: HM 1.2.1: seconds ``up --via hostio`` waits for this process's own control-port requests.
+HOSTIO_GATE_WAIT_S = 8.0
 CFG_DIR_ENV = "HARNESS_MANAGER_MPS3_OPENOCD_DIR"
 MULTICORE_DESIGN = designs.MULTICORE_DESIGN    # nanosoc_multicore: one access port per core
 DAP_TAP_IDCODE = designs.DAP_TAP_IDCODE        # nanosoc_mps3_jtag.cfg: _DAP_TAPID (silicon-verified)
@@ -350,17 +353,22 @@ class Mps3OnBoard:
             return None
         return got if isinstance(got, str) else None
 
-    def run(self, verb: str, *, rm: str = "", timeout: float = 30.0) -> Any:
-        """``mps3-debug VERB [--rm RM] --json`` on the board: the claim's argv (key only, the
-        pinned host key, ``-J`` the hub) as a one-shot (``claim.ONE_SHOT_OPTIONS``: batch mode,
-        no forwards, no tty), run by ``claim.DEFAULT_RUN``. ssh's own failure (255) raises."""
+    def run(self, verb: str, *, rm: str = "", timeout: float = 30.0, via: str = "") -> Any:
+        """``mps3-debug VERB [--via hostio] [--rm RM] --json`` on the board: the claim's argv
+        (key only, the pinned host key, ``-J`` the hub) as a one-shot (``claim.ONE_SHOT_OPTIONS``:
+        batch mode, no forwards, no tty), run by ``claim.DEFAULT_RUN``. ssh's own failure (255)
+        raises. ``via="hostio"`` (HM 1.2.1) adds ``--via hostio`` to an ``up`` and holds this
+        process's control gate while it runs: the launcher reads harnessd's single-client 6900."""
         from . import claim as _claim
 
-        words = [self.launcher, verb, *(["--rm", rm] if rm else []), "--json"]
+        hostio = via == "hostio"
+        words = [self.launcher, verb, *(["--via", "hostio"] if hostio else []),
+                 *(["--rm", rm] if rm else []), "--json"]
         claim = self._claim()
         argv = claim.ssh_argv([shlex.join(words)])
         argv = [argv[0], *_claim.ONE_SHOT_OPTIONS, *argv[1:]]
-        res = _claim.DEFAULT_RUN(argv, timeout)
+        with self._control_gate(hostio, " ".join(words)):
+            res = _claim.DEFAULT_RUN(argv, timeout)
         if res.returncode == 255:
             why = _claim._stderr_line(res.stderr) or "ssh exited with status 255"
             raise claim.map_ssh_failure(UnreachableError(
@@ -368,6 +376,42 @@ class Mps3OnBoard:
                 hint="`harness-manager board claim-status TARGET` checks the claim and the host "
                      "key"))
         return res
+
+    def _control_gate(self, wanted: bool, what: str) -> contextlib.AbstractContextManager[Any]:
+        """The board's control-port gate (SERIAL-6900) for the length of a call that makes the
+        board's own launcher use 6900 (``up --via hostio``), so this process's polls do not
+        take the port meanwhile. Not held when the wait runs out: the launcher then says
+        ``busy`` itself."""
+        stack = contextlib.ExitStack()
+        gate = getattr(getattr(self._session, "shell", None), "gate", None)
+        if wanted and callable(gate):
+            try:
+                stack.enter_context(gate().slot(what, wait_s=HOSTIO_GATE_WAIT_S))
+            except HarnessError:
+                pass
+        return stack
+
+    def hostio_gate(self) -> HarnessError | None:
+        """Can a hostio session be asked for? The DUT's pins must be in hostio4 mode (the
+        ``hostio`` verb; read here, nothing sent to the launcher). The refusal names the
+        control that fixes it; None: go on. An unreadable mode (the board is unreachable)
+        raises as it is."""
+        from harness_manager.services import debug_onboard as ob
+
+        read = getattr(getattr(self._session, "consoles", None), "hostio_status", None)
+        if not callable(read):
+            return UnavailableError("debug_dut", ob.HOSTIO_NO_SUPPORT_WORDS,
+                                    hint=ob.HOSTIO_NO_SUPPORT_HINT)
+        try:
+            view = read()
+        except UnavailableError:
+            return UnavailableError("debug_dut", ob.HOSTIO_NO_SUPPORT_WORDS,
+                                    hint=ob.HOSTIO_NO_SUPPORT_HINT)
+        if str(view.get("mode") or "console") == "hostio4":
+            return None
+        if str(view.get("pending") or "") == "hostio4":
+            return RefusedError(ob.HOSTIO_PENDING_WORDS, hint=ob.HOSTIO_PENDING_HINT)
+        return RefusedError(ob.HOSTIO_MODE_WORDS, hint=ob.HOSTIO_MODE_HINT)
 
     def design_name(self) -> str:
         """The loaded design's name for ``--rm`` (``KNOWN_DESIGNS``), "" when unknown."""

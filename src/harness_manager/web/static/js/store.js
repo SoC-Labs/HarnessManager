@@ -1024,6 +1024,10 @@ export function handleEvent(ev) {
     if (d.where !== undefined) b.debug.where = d.where;
     if (Array.isArray(d.gdb_ports)) b.debug.gdb_ports = d.gdb_ports;
     if (Array.isArray(d.cores)) b.debug.cores = d.cores;
+    // HM 1.2.1 (hostio preview): how the DUT is reached, what its gdb can do, what gdb sends first
+    if (d.via !== undefined) b.debug.via = d.via;
+    if (Array.isArray(d.capabilities)) b.debug.capabilities = d.capabilities;
+    if (Array.isArray(d.gdb_init)) b.debug.gdb_init = d.gdb_init;
     if (d.state !== "up" && d.state !== "starting") {
       b.debug.gdb_port = 0; b.debug.telnet_port = 0; b.debug.tcl_port = 0;
       if (b.debug.gdb_ports) b.debug.gdb_ports = [];
