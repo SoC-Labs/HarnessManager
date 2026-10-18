@@ -56,7 +56,7 @@ The MPS3 model is `src/harness_manager_mps3/pins/mps3_board_pins.json`. It is **
 
 Options: `--platform DIR` (default `../mps3-nanosoc-platform` or `$HM_PLATFORM_DIR`), `--ref BRANCH` (or `$HM_PLATFORM_REF`), `--pkg FILE`.
 
-**More than one shell.** The model describes every shell in the generator's `SHELLS` list (`SID@REF`, the default shell first); `--check` regenerates exactly that list. Today it is `0x72BB0A36@feat/rm-ila-mint` (the default, fielded) and RC2, `0x44EE76D5@6beea093…`: the platform commit on `feat/linux-harness` that published `fielded/0x44EE76D5/`. RC2 is pinned to that commit, not the branch, because a minted static never changes and that branch's head moves every day. Before RC2 was in the model, `kit script --static-id 0x44EE76D5` refused (`xdc:static_id`: the model had no such shell).
+**More than one shell.** The model describes every shell in the generator's `SHELLS` list (`SID@REF`, the default shell first); `--check` regenerates exactly that list. Today it is `0xA5856D30@89a8dcdf…` (the default: v2.2 / mint 4, `origin/integ/r3`, the 2.2.0 final; a 54-port / 260-bit boundary, `NGPIO` 48, the `hostio` group, 24 decoupler INTFs), `0x72BB0A36@feat/rm-ila-mint` (47 / 148) and RC2, `0x44EE76D5@6beea093…`: the platform commit on `feat/linux-harness` that published `fielded/0x44EE76D5/`. RC2 is pinned to that commit, not the branch, because a minted static never changes and that branch's head moves every day. Before RC2 was in the model, `kit script --static-id 0x44EE76D5` refused (`xdc:static_id`: the model had no such shell).
 
 ```
 .venv/bin/python tools/gen_mps3_pins.py --shell 0x72BB0A36@feat/rm-ila-mint --shell 0x44EE76D5@BRANCH

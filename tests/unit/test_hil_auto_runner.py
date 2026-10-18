@@ -18,7 +18,7 @@ from harness_manager.checks.run import EXIT_FAIL, EXIT_PASS, EXIT_STOP, Options,
 from tests.fakes.hil_auto import ScriptedHm, held, is_write, refused, unreachable, verb_of
 
 B = "192.168.10.101"
-SID = "0x44ee76d5"
+SID = "0xa5856d30"
 
 
 class Sleeps(list):
@@ -452,7 +452,7 @@ def test_twin_bare_metal_has_no_claim_in_its_end_state(tmp_path):
 
 
 @pytest.mark.parametrize("args", [["--interval", "5", "--repeat", "2"], ["--gap", "0"],
-                                  ["--expect-static", "44ee76d5"], ["--until", "25:99x"]])
+                                  ["--expect-static", "a5856d30"], ["--until", "25:99x"]])
 def test_no_tight_loops_and_no_bad_arguments(tmp_path, args):
     hm = ScriptedHm()
     assert run(tmp_path / "ev", hm, *args) == EXIT_STOP and hm.calls == []

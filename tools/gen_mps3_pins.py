@@ -74,10 +74,12 @@ from harness_manager.services.xdc.hdl import (  # noqa: E402
 OUT = REPO / "src" / "harness_manager_mps3" / "pins" / "mps3_board_pins.json"
 DEFAULT_REF = "feat/rm-ila-mint"
 DEFAULT_STATIC = "0x72BB0A36"
-#: The shells the committed model describes, ``SID@REF``, the default shell first. RC2
+#: The shells the committed model describes, ``SID@REF``, the default shell first (v2.2 /
+#: mint 4, 0xA5856D30, pinned to origin/integ/r3 = the 2.2.0 final). RC2
 #: (0x44EE76D5) is pinned to the commit that published its record (feat/linux-harness
 #: 6beea09): a minted static never changes, and the branch head moves every day.
-SHELLS = ["0x72BB0A36@feat/rm-ila-mint",
+SHELLS = ["0xA5856D30@89a8dcdfceed21d63785404f4fb1633e707e40e4",
+          "0x72BB0A36@feat/rm-ila-mint",
           "0x44EE76D5@6beea093ff5e11517282b44034bdf59d0cbef746"]
 PART = "xcku115-flvb1760-1-c"
 PKG_CANDIDATES = [
@@ -467,8 +469,15 @@ def shell_boundary(plat: Platform, src: Sources) -> dict[str, Any]:
         raise GenError(f"the boundary counts {ports} ports / {bits} bits, boundary.yaml says "
                        f"{yml['totals']}")
     intf_m = re.search(r"(\d+) INTFs, IDs 0-(\d+)", plat.text(BOUNDARY_YAML))
-    return {"totals": {"ports": ports, "bits": bits,
-                       "decoupler_intfs": int(intf_m.group(1)) if intf_m else None},
+    intfs = int(intf_m.group(1)) if intf_m else None
+    # boundary.yaml's INTF comment predates mint 4; the contract states the hostio INTFs added
+    more = re.search(r"(\d+)\s+more\s+decoupler\s+INTFs,\s+IDs\s+(\d+)-(\d+)", plat.text(PARTITION_MD))
+    if intfs is not None and more and any(g["id"] == "hostio" for g in groups_out):
+        if int(more.group(3)) - int(more.group(2)) + 1 != int(more.group(1)) or int(more.group(2)) != intfs:
+            raise GenError(f"{PARTITION_MD}: the added decoupler INTFs {more.group(0)!r} do not follow "
+                           f"the {intfs} in {BOUNDARY_YAML}")
+        intfs += int(more.group(1))
+    return {"totals": {"ports": ports, "bits": bits, "decoupler_intfs": intfs},
             "ngpio": ngpio, "direction_convention": "shell_dir is the shell's view (O = shell drives); "
                                                      "rm_dir is the RM's port direction",
             "groups": groups_out, "src": [f"{k_md}:1", f"{k_y}:1", f"{k_stub}:1"]}
@@ -481,12 +490,16 @@ def shell_facts(plat: Platform, src: Sources, boundary: dict[str, Any], nets: di
     groups_out = boundary["groups"]
     bclocks = []
     for bc in F.BOUNDARY_CLOCKS:
+        bc = bc | getattr(F, "SHELL_BOUNDARY_CLOCKS", {}).get(sid, {}).get(bc["signal"], {})
         bclocks.append({k: v for k, v in bc.items() if k != "cite"} | {"src": cite(plat, src, *bc["cite"])})
 
     all_sigs = {s["name"]: (g["id"], s) for g in groups_out for s in g["signals"]}
     conn = []
     covered: set[str] = set()
-    for c in F.CONNECTIVITY:
+    facts = list(F.CONNECTIVITY)
+    if any(g["id"] == "hostio" for g in groups_out):
+        facts += F.HOSTIO_CONNECTIVITY
+    for c in facts:
         ref = cite(plat, src, *c["cite"])
         names = [c["signal"]] if "signal" in c else \
             [s["name"] for s in next(g for g in groups_out if g["id"] == c["group"])["signals"]]
@@ -520,6 +533,8 @@ def shell_facts(plat: Platform, src: Sources, boundary: dict[str, Any], nets: di
     pblock = {}
     for p in F.PBLOCK:
         p = own.pop(p["key"], p)
+        if p.get("drop"):
+            continue
         pblock[p["key"]] = {"value": p["value"], "src": cite(plat, src, *p["cite"])}
     for p in own.values():
         pblock[p["key"]] = {"value": p["value"], "src": cite(plat, src, *p["cite"])}

@@ -132,7 +132,7 @@ class ScriptedHm:
     ``card`` False: no user microSD at all (board 2: ``slot status`` answers ``card: false``);
     ``image`` (Linux) one of ``IMAGES``."""
 
-    def __init__(self, *, static: str = "0x44ee76d5", impl: str = "linux",
+    def __init__(self, *, static: str = "0xa5856d30", impl: str = "linux",
                  netboot: bool = True, claim: str = "other", card: bool = True,
                  image: str = "v6n") -> None:
         self.static, self.impl, self.netboot, self.claim = static, impl, netboot, claim

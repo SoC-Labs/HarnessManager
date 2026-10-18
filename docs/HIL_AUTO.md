@@ -175,7 +175,7 @@ exits 2.
 | `--until HH:MM` (or `--deadline`) | none | no check starts after `until − margin`; then it restores and exits. `HH:MM` is the next one; an ISO time also works |
 | `--margin MIN` | 10 | the quiet minutes before `--until` and before the lease expires |
 | `--stop-on-first-fail` | off | end at the first failed check (still restores) |
-| `--expect-static HEX` | the runbook's | the static the board must run (`0x44ee76d5` Linux RC2, `0x72bb0a36` bare metal) |
+| `--expect-static HEX` | the runbook's | the static the board must run (`0xa5856d30` Linux v2.2 (`0x44ee76d5` for an RC2 board), `0x72bb0a36` bare metal) |
 | `--gap S` | 3 | seconds between two commands |
 | `--max-unreachable N` | 3 | tries of a read check before an unreachable board stops the run |
 | `--announce-only` | off | write `ANNOUNCE.txt` and exit |
@@ -195,7 +195,7 @@ nocard plan's skips differ from the runbook's Netboot mode or Card-less mode lis
 **`linux-netboot`** (per iteration):
 
 - **read:** 0.2 (no share on `tty_00`), 0.3 (lease held here), 0.4 (version), A1 identity
-  (shell `0x44ee76d5`, `harness_impl linux`: anything else **stops**), A2 panel, A3 XVC status,
+  (shell `0xa5856d30`, `harness_impl linux`: anything else **stops**), A2 panel, A3 XVC status,
   A5 `board identity` (net-protocol v0.16: the verdict and what the board reports are
   recorded, a mismatch is never a failure; the pass line names the image, A1's
   `harness_version` and `features`), B1 claim status, B3 `persist.state` (only once B2's adopt pinned the claim here), C1 slots

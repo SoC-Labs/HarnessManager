@@ -386,7 +386,7 @@ def single_shell_doc() -> dict:
 
 def test_the_committed_model_holds_rc2_as_a_second_not_fielded_shell():
     doc = pins.load_model()
-    assert list(doc["shells"]) == [SID, RC2] and doc["default_shell"] == SID
+    assert list(doc["shells"]) == ["0xA5856D30", SID, RC2] and doc["default_shell"] == "0xA5856D30"
     rc2, base = doc["shells"][RC2], doc["shells"][SID]
     assert rc2["fielded"] is False and base["fielded"] is True       # the board still runs SID
     assert rc2["platform"]["commit"].startswith("6beea09")
@@ -396,11 +396,14 @@ def test_the_committed_model_holds_rc2_as_a_second_not_fielded_shell():
     assert set(rc2["owns"]) - set(base["owns"]) == {
         "USD_CLK", "USD_CMD", "USD_DAT[0]", "USD_DAT[1]", "USD_DAT[2]", "USD_DAT[3]", "USD_NCD"}
     assert any("DDR4" in n for n in rc2["notes"])
-    # a release candidate never makes a board net hw-proven
-    assert doc["nets"]["USD_CLK"]["verified"] == "pinmap"
+    # a release candidate never makes a board net hw-proven: USD_CLK is hw-proven only because
+    # the fielded v2.2 shell (0xA5856D30) owns it too (it was "pinmap" while RC2 alone did)
+    assert "USD_CLK" in doc["shells"]["0xA5856D30"]["owns"] and "USD_CLK" not in base["owns"]
+    assert doc["shells"]["0xA5856D30"]["fielded"] is True
+    assert doc["nets"]["USD_CLK"]["verified"] == "hw-proven"
     for sid, sh in doc["shells"].items():
         assert sh["platform"]["ref"] and len(sh["platform"]["commit"]) == 40, sid
-    assert doc["shells"][SID]["platform"]["commit"] == doc["status"]["platform_commit"]
+    assert doc["shells"][doc["default_shell"]]["platform"]["commit"] == doc["status"]["platform_commit"]
 
 
 def test_rc2s_rm_kit_is_its_own():
