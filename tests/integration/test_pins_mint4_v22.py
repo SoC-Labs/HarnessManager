@@ -77,7 +77,10 @@ def test_every_v22_boundary_signal_has_connectivity(model):
     sh = model.shell(V22)
     names = {c["signal"] for c in sh["connectivity"]}
     assert {s.name for s in model.boundary(V22)} <= names
-    assert sh["pblock"]["capacity"]["value"]["LUT"] == 214080 and "slice_range" not in sh["pblock"]
+    pb = {k: v["value"] for k, v in sh["pblock"].items()}
+    assert pb["capacity"] == {"LUT": 213456, "FF": 426912, "DSP": 2160} and pb["bram_tiles"] == 720
+    assert pb["slice_range"] == "SLICE_X0Y0:SLICE_X95Y299" and pb["ramb36_range"] == "RAMB36_X0Y0:RAMB36_X11Y59"
+    assert pb["dut_clk_hd_clk_src"] == "BUFGCE_X2Y24" and pb["reference_use"].startswith("rm_nanosoc: 11,319 LUT")
 
 
 def test_rm_kit_for_v22_is_the_54_port_boundary(tmp_path: Path, capsys):
@@ -87,6 +90,9 @@ def test_rm_kit_for_v22_is_the_54_port_boundary(tmp_path: Path, capsys):
         "manifest.json", "minimal_connectivity.csv", "minimal_connectivity.md",
         "minimal_ooc.xdc", "minimal_pblock.md", "minimal_wrapper_skeleton.sv"]
     assert "54 ports, 260 bits, 24 decoupler interfaces" in (tmp_path / "minimal_connectivity.md").read_text()
+    assert "set_property HD.CLK_SRC BUFGCE_X2Y24 [get_ports -quiet dut_clk]" in (tmp_path / "minimal_ooc.xdc").read_text()
+    pbm = (tmp_path / "minimal_pblock.md").read_text()
+    assert "SLICE_X0Y0:SLICE_X95Y299" in pbm and "LUT 213,456, FF 426,912, DSP 2,160" in pbm and "11,319 LUT" in pbm
     wrap = (tmp_path / "minimal_wrapper_skeleton.sv").read_text()
     assert "NGPIO = 48" in wrap and "hostio_mode_i" in wrap and "hostio_iodata_oe_o" in wrap
     rows = list(csv.reader((tmp_path / "minimal_connectivity.csv").read_text().splitlines()))

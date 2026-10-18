@@ -27,6 +27,8 @@ create_clock -name dbg_bscan_drck -period 80.000 -waveform {0.000 40.000} [get_p
 create_clock -name jtag_tck -period 100.000 -waveform {0.000 50.000} [get_ports jtag_tck]
 # phy_rmii_ref_clk: static: clk_out2_shell_bd_clk_wiz_shell_0
 create_clock -name phy_rmii_ref_clk -period 20.000 -waveform {0.000 10.000} [get_ports phy_rmii_ref_clk]
+# the static's clock buffer that drives dut_clk into the partition
+set_property HD.CLK_SRC BUFGCE_X2Y24 [get_ports -quiet dut_clk]
 
 # --- every boundary clock is asynchronous to the others (the static owns the CDC) ---
 set_clock_groups -name async_nanosoc_ila -asynchronous \
