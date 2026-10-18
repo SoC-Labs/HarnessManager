@@ -135,13 +135,14 @@ from harness_manager.core.errors import (
     PortBoundError,
     UnavailableError,
     UnreachableError,
+    UsageError,
 )
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.hostid import is_this_host
 from harness_manager.core.pack import BoardSession, DebugAdapter
 from harness_manager.core.services import DebugStatus
 from harness_manager.services import openocd_probe
-from harness_manager.services.debug_onboard import DownFirst, OnBoard
+from harness_manager.services.debug_onboard import VIAS, DownFirst, OnBoard
 from harness_manager.services.debug_onboard import mode as on_board_mode
 from harness_manager.services.openocd_probe import REMOTE_BITBANG
 
@@ -547,11 +548,16 @@ GDB_REMOTE_TIMEOUT_S = 60
 GDB_BINARY = "arm-none-eabi-gdb"
 
 
-def gdb_command(gdb_port: int, host: str = "127.0.0.1") -> str:
+def gdb_command(gdb_port: int, host: str = "127.0.0.1", *,
+                gdb_init: Sequence[str] = ()) -> str:
     """The gdb command line that attaches to a debug session's gdb port: what ``debug up``
     prints (``attach``) and what the app's Debug card copies (``sections/debug.js``, which
-    builds the same string). Double quotes, so it pastes into sh, cmd and PowerShell."""
-    return (f'{GDB_BINARY} -ex "set remotetimeout {GDB_REMOTE_TIMEOUT_S}" '
+    builds the same string). Double quotes, so it pastes into sh, cmd and PowerShell.
+
+    ``gdb_init`` (HM 1.2.1): the commands the session needs before ``target extended-remote``
+    (hostio: ``set remote p-packet off`` and ``set remote P-packet off``), one ``-ex`` each."""
+    init = "".join(f'-ex "{c}" ' for c in gdb_init)
+    return (f'{GDB_BINARY} -ex "set remotetimeout {GDB_REMOTE_TIMEOUT_S}" {init}'
             f'-ex "target extended-remote {host}:{int(gdb_port)}"')
 
 
@@ -890,6 +896,19 @@ class DebugService:
                 return self._status_of(rec, "starting", f"starting, held by {self._holder(rec)}")
             return self._status_of(rec, "up", f"held by {self._holder(rec)}")
 
+    def hostio_design(self, session: BoardSession) -> dict[str, Any] | None:
+        """HM 1.2.1: does the loaded design have a hostio link, as the board's launcher says
+        (``version --json``)? ``{"design": NAME, "hostio": True|False|None}``; None when the
+        board has no on-board route here. Never raises."""
+        try:
+            rt = self.onboard.route(session)
+            if rt is None:
+                return None
+            name, flag = self.onboard.hostio_design(rt)
+        except HarnessError:
+            return None
+        return {"design": name, "hostio": flag} if name else None
+
     def openocd(self) -> str:
         """The OpenOCD ``up`` and ``detect`` would run (``find_openocd``), else
         ``UnavailableError`` (12). Only the adapter probe runs: no board, no tunnel, so the CLI
@@ -911,14 +930,23 @@ class DebugService:
         never raises. ``session``: unused (the binary is the machine's, not the board's)."""
         return openocd_report(self.state_dir)
 
-    def up(self, session: BoardSession, *, _prefer: DebugPorts | None = None) -> DebugStatus:
+    def up(self, session: BoardSession, *, via: str = "jtag",
+           _prefer: DebugPorts | None = None) -> DebugStatus:
         """Start OpenOCD for the loaded design and wait until it serves gdb.
+
+        ``via`` (HM 1.2.1): ``"jtag"`` (default) or ``"hostio"``: the DUT's hostio4 link, on
+        the board's OpenOCD only (memory and load; no halt, step, registers or breakpoints).
+        A hostio ``up`` is refused here, with nothing sent to the board's launcher, for a
+        board not claimed by this Harness Manager or whose pins are not in hostio4 mode (15).
 
         Exit codes: 12 no OpenOCD / no adapter, 13 no debug port on the loaded
         design, 8 already up (ours), 4 held by another process or the board's
         JTAG port is taken, 5 local port taken, 7 board unreachable, 6 other.
         """
         board_id = session.candidate.board_id
+        if via not in VIAS:
+            raise UsageError(f"via must be jtag or hostio, not {via!r}",
+                             hint="`debug up TARGET --via hostio` or no --via for JTAG")
         with self._board_lock(board_id):
             rec, verdict, _ = self._inspect(board_id)
             if rec is not None:
@@ -930,9 +958,9 @@ class DebugService:
                                 holder=self._holder(rec),
                                 hint=f"held by {self._holder(rec)}; 'down --force' takes it")
             try:                                                 # DEBUG-ONBOARD
-                onboard = self.onboard.route(session)
+                onboard = self.onboard.route(session, via)
                 if onboard is not None:
-                    return self.onboard.up(session, onboard)
+                    return self.onboard.up(session, onboard, via)
             except HarnessError as exc:
                 self._publish(board_id, "failed", detail=str(exc), where="board")
                 raise
@@ -1278,7 +1306,8 @@ class DebugService:
 
     def _reopen(self, session: BoardSession, ports: DebugPorts) -> None:
         try:
-            self.up(session, _prefer=ports)
+            via = self.onboard.reopen_via(session.candidate.board_id) if ports is None else "jtag"
+            self.up(session, via=via, _prefer=ports)
         except HarnessError as exc:
             # up() already published "failed"; say why it stays down in plain words.
             log.info("debug session not reopened after the swap: %s", exc)

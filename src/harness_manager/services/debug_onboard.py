@@ -33,6 +33,20 @@ stdout; unknown keys are ignored::
   shows a watchdog stop as "closed for the swap", never as a failure;
 - the launcher stops an idle OpenOCD after 2 h.
 
+**Via hostio (HM 1.2.1; the launcher's ``up --via hostio``).** The same route, with the DUT's
+hostio4 link instead of JTAG: memory reads and writes and image loads only (no halt, step,
+registers or breakpoints). ``up`` takes ``via="jtag"`` (default) or ``"hostio"``; the reply's
+appended keys are ``via``, ``capabilities`` and ``gdb_init`` (a reply without them is a JTAG
+session with the full capability set). A client sends ``gdb_init`` (hostio:
+``set remote p-packet off`` and ``set remote P-packet off``) before ``target extended-remote``.
+The refusal codes ``hostio_mode``, ``rp_held``, ``no_hostio``, ``no_adp``,
+``hostio_unavailable`` (and ``busy`` for the other via, the control port 6900 or the ADP port
+6933) are mapped to plain words (``launcher_error``). Before anything is sent, HM itself
+refuses a hostio ``up`` for a board it has not claimed or whose pins are not in hostio4 mode
+(``OnBoardRoute.hostio_gate``). The launcher reads the pins' mode from harnessd's single-client
+6900: HM holds no 6900 connection of its own (every call opens and closes), and holds its
+own control gate while ``up --via hostio`` runs.
+
 Which path (the setting ``debug.on_board``, L6; ``$HARNESS_MANAGER_DEBUG_ON_BOARD``):
 
 - ``auto`` (default): the board's OpenOCD when the pack has an on-board route, the board is a
@@ -98,6 +112,21 @@ from harness_manager.core.services import DebugStatus
 log = logging.getLogger(__name__)
 
 CAPABILITY = "debug_dut"
+#: HM 1.2.1: the two ways a session reaches the DUT.
+VIA_JTAG, VIA_HOSTIO = "jtag", "hostio"
+VIAS = (VIA_JTAG, VIA_HOSTIO)
+JTAG_CAPABILITIES = ("mem_read", "mem_write", "load", "halt", "step", "breakpoints",
+                     "registers", "reset")
+HOSTIO_CAPABILITIES = ("mem_read", "mem_write", "load")
+#: What a gdb client sends first on a hostio session (the contract's ``gdb_init``): without
+#: them gdb asks for register 25 and the link drops.
+HOSTIO_GDB_INIT = ("set remote p-packet off", "set remote P-packet off")
+#: The capabilities a hostio session lacks, and why (shown beside every disabled control).
+JTAG_ONLY = ("halt", "step", "registers", "breakpoints")
+HOSTIO_LIMITS = ("hostio debug reads and writes memory and loads images; halt, step, "
+                 "registers and breakpoints need JTAG")
+HOSTIO_VERIFY_NOTE = ("hostio cannot verify an image in place (no verify_image): read it back "
+                      "with `dump_image` and compare, or check words with `x/4wx ADDRESS`")
 SCHEMA = "mps3-debug/1"
 #: The setting's key and its developer variable (the row: ``settings/rows.py`` L6).
 SETTING = "debug.on_board"
@@ -152,12 +181,17 @@ class OnBoardRoute(Protocol):
     - ``hold()``: open (or join) the forward of the board's gdb ports; returns ``{board port:
       local port}``, local ends on 127.0.0.1 only. ``release()`` lets it go (idempotent);
     - ``describe()``: one line for the status.
+
+    Optional (HM 1.2.1): ``run(..., via="hostio")`` adds ``--via hostio`` to an ``up``, and
+    ``hostio_gate()`` returns the refusal (a ``HarnessError``) when a hostio session cannot be
+    asked for yet (the DUT's pins are not in hostio4 mode), else None.
     """
 
     launcher: str
 
     def plan(self) -> tuple[str, HarnessError | None]: ...
     def run(self, verb: str, *, rm: str = "", timeout: float = STATUS_TIMEOUT_S) -> Any: ...
+    def hostio_gate(self) -> HarnessError | None: ...
     def design_name(self) -> str: ...
     def hold(self) -> dict[int, int]: ...
     def release(self) -> None: ...
@@ -209,6 +243,10 @@ class LauncherReply:
     busy: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
     log_tail: tuple[str, ...] = ()
+    #: HM 1.2.1: appended keys; absent = a JTAG session with the full capability set
+    via: str = VIA_JTAG
+    capabilities: tuple[str, ...] = JTAG_CAPABILITIES
+    gdb_init: tuple[str, ...] = ()
     raw: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     @property
@@ -253,6 +291,14 @@ def _reply(obj: dict[str, Any]) -> LauncherReply | None:
     tail = obj.get("log_tail") if isinstance(obj.get("log_tail"), list) else []
     busy = obj.get("busy") if isinstance(obj.get("busy"), dict) else None
     error = obj.get("error") if isinstance(obj.get("error"), dict) else None
+    via = _str(obj.get("via")).strip().lower()
+    via = via if via in VIAS else VIA_JTAG
+    caps = obj.get("capabilities")
+    capabilities = (tuple(c for c in caps if isinstance(c, str)) if isinstance(caps, list)
+                    else HOSTIO_CAPABILITIES if via == VIA_HOSTIO else JTAG_CAPABILITIES)
+    init = obj.get("gdb_init")
+    gdb_init = (tuple(c for c in init if isinstance(c, str)) if isinstance(init, list)
+                else HOSTIO_GDB_INIT if via == VIA_HOSTIO else ())
     return LauncherReply(
         state=state, already=obj.get("already") is True, rm_id=_str(obj.get("rm_id")),
         design=_str(obj.get("design")), cfg=tuple(str(c) for c in cfg),
@@ -260,7 +306,8 @@ def _reply(obj: dict[str, Any]) -> LauncherReply | None:
         openocd_version=_str(ocd.get("version")), adapter=_str(ocd.get("adapter")),
         idcode=_str(tap.get("idcode")).lower(), cores=tuple(cores),
         telnet_port=_int(obj.get("telnet_port")), tcl_port=_int(obj.get("tcl_port")),
-        busy=busy, error=error, log_tail=tuple(str(t) for t in tail), raw=obj)
+        busy=busy, error=error, log_tail=tuple(str(t) for t in tail), via=via,
+        capabilities=capabilities, gdb_init=gdb_init, raw=obj)
 
 
 def _objects(text: str | None) -> list[dict[str, Any]]:
@@ -306,6 +353,16 @@ def parse_capabilities(text: str | None) -> tuple[str, ...] | None:
     return ()
 
 
+def parse_design_hostio(text: str | None, name: str) -> bool | None:
+    """``version --json``'s ``designs[]`` entry named ``name``: its ``hostio`` flag. None: no
+    such entry, or no flag (an older launcher): unknown, and the board decides at ``up``."""
+    for obj in _objects(text):
+        for d in obj.get("designs") if isinstance(obj.get("designs"), list) else ():
+            if isinstance(d, dict) and d.get("name") == name and isinstance(d.get("hostio"), bool):
+                return d["hostio"]
+    return None
+
+
 def _tail(res: Any, n: int = 3) -> str:
     lines = [ln.strip() for ln in ((getattr(res, "stderr", "") or "") + "\n"
                                   + (getattr(res, "stdout", "") or "")).splitlines() if ln.strip()]
@@ -322,11 +379,89 @@ def busy_words(busy: dict[str, Any] | None) -> str:
     return by or (f"a client from {peer}" if peer else "another JTAG client")
 
 
+#: HM 1.2.1: the plain words for the hostio path's refusals (``hostio_error``). Verbatim, so
+#: the guide can quote them.
+HOSTIO_MODE_WORDS = "the DUT's pins are in console mode, so hostio debug is not available"
+HOSTIO_MODE_HINT = ("press \"Switch to hostio4\" (Consoles), then load the design again so "
+                    "the change takes effect")
+HOSTIO_PENDING_WORDS = ("the DUT's pins will switch to hostio4 at the next design load, so "
+                        "hostio debug is not available yet")
+HOSTIO_PENDING_HINT = "load the design again, then open the hostio session"
+HOSTIO_RP_HELD_WORDS = ("the DUT is held in reset (or cut off from the board), so its hostio "
+                        "link is not running")
+HOSTIO_RP_HELD_HINT = "load the design (a swap releases the DUT), then open the hostio session"
+HOSTIO_NO_ADP_WORDS = "nothing answers on the DUT's hostio debug link"
+HOSTIO_NO_ADP_HINT = ("check that the design is loaded and the DUT's pins are in hostio4 mode "
+                      "(Consoles), then try again")
+HOSTIO_UNAVAILABLE_WORDS = "this board's software has no hostio bridge"
+HOSTIO_UNAVAILABLE_HINT = "hostio debug needs the mint-4 board software; use JTAG instead"
+HOSTIO_NO_CFG_WORDS = "this board's Linux image predates hostio debug"
+HOSTIO_NO_CFG_HINT = "use JTAG, or update the board's Linux image"
+HOSTIO_NO_DESIGN_HINT = ("load a nanoSoC design (with the pins in hostio4 mode first), then "
+                         "open the hostio session")
+BUSY_OTHER_VIA_HINT = "close the session (`harness-manager debug down TARGET`), then open it again"
+BUSY_CONTROL_WORDS = ("another client holds the board's control connection (port 6900), which "
+                      "hostio debug needs to check the DUT")
+BUSY_CONTROL_HINT = ("close the other client (another Harness Manager or pyverify), then try "
+                     "again")
+BUSY_ADP_HINT = "close the other hostio client, then try again"
+VIA_WORDS = {VIA_JTAG: "JTAG", VIA_HOSTIO: "hostio"}
+
+
+def _busy_by(reply: LauncherReply) -> str:
+    return _str((reply.busy or {}).get("by"))
+
+
+def hostio_error(returncode: int, reply: LauncherReply, via: str) -> HarnessError | None:
+    """The hostio path's refusals as plain words and the right error class; None: not one of
+    them (``launcher_error`` goes on). Never shows a raw code."""
+    code, by = reply.code, _busy_by(reply)
+    said = reply.message
+    if by.startswith("mps3-debug via "):
+        other = VIA_WORDS.get(by.rsplit(" ", 1)[-1], by)
+        return HeldError(f"a {other} debug session is already up on the board; the board "
+                         "runs one debug session at a time", holder=by,
+                         hint=BUSY_OTHER_VIA_HINT)
+    if by == "6900 control":
+        return HeldError(BUSY_CONTROL_WORDS, holder=by, hint=BUSY_CONTROL_HINT)
+    if by == "6933 hostio ADP":
+        peer = _str((reply.busy or {}).get("peer"))
+        return HeldError("another client holds the DUT's hostio debug link"
+                         + (f" ({peer})" if peer else ""), holder=by, hint=BUSY_ADP_HINT)
+    if code == "hostio_mode":
+        pending = "pending" in said.lower()
+        return RefusedError(HOSTIO_PENDING_WORDS if pending else HOSTIO_MODE_WORDS,
+                            hint=HOSTIO_PENDING_HINT if pending else HOSTIO_MODE_HINT)
+    if code == "rp_held":
+        return RefusedError(HOSTIO_RP_HELD_WORDS, hint=HOSTIO_RP_HELD_HINT)
+    if code == "no_adp":
+        cls = RefusedError if returncode == 15 else ActionFailedError
+        return cls(HOSTIO_NO_ADP_WORDS, hint=HOSTIO_NO_ADP_HINT)
+    if code == "hostio_unavailable":
+        return UnavailableError(CAPABILITY, HOSTIO_UNAVAILABLE_WORDS,
+                                hint=HOSTIO_UNAVAILABLE_HINT)
+    if code == "no_hostio":
+        return NothingOnTargetError(f"the loaded design ({reply.what()}) has no hostio debug "
+                                    "link", hint="use JTAG, or load a nanoSoC-family design")
+    if via == VIA_HOSTIO and code == "no_dap":
+        loaded_none = "no design is loaded" in said.lower() or reply.design in ("", "greybox")
+        return NothingOnTargetError(
+            "no design is loaded, so there is nothing to debug over hostio" if loaded_none else
+            f"the loaded design ({reply.what()}) has no debug port",
+            hint=HOSTIO_NO_DESIGN_HINT if loaded_none else "load a nanoSoC design first")
+    if via == VIA_HOSTIO and code == "no_cfg":
+        return IncompatibleError(HOSTIO_NO_CFG_WORDS, hint=HOSTIO_NO_CFG_HINT)
+    return None
+
+
 def launcher_error(verb: str, returncode: int, reply: LauncherReply, *,
-                   rm: str = "") -> HarnessError:
+                   rm: str = "", via: str = VIA_JTAG) -> HarnessError:
     """A launcher's refusal as the Harness Manager error (and exit code) it means."""
     code = reply.code
     said = reply.message or f"`mps3-debug {verb}` exited {returncode}"
+    plain = hostio_error(returncode, reply, via)
+    if plain is not None:
+        return plain
     if returncode == RC_BUSY or code == "busy":
         who = busy_words(reply.busy)
         return HeldError(f"the board's JTAG is held by {who}: {said}", holder=who,
@@ -522,6 +657,19 @@ class _Live:
     status: DebugStatus
 
 
+HOSTIO_NO_SUPPORT_WORDS = "this board has no hostio support"
+HOSTIO_NO_SUPPORT_HINT = "hostio debug needs the mint-4 board software; use JTAG instead"
+HOSTIO_NEEDS_BOARD = "hostio debug runs OpenOCD on the board, over the board's SSH"
+
+
+def _hostio_needs_board(err: HarnessError) -> HarnessError:
+    """A refusal (not claimed, another key's claim) with the hostio words in front; any other
+    error as it is."""
+    if type(err) is RefusedError:
+        return RefusedError(f"{HOSTIO_NEEDS_BOARD}: {err.message}", hint=err.hint)
+    return err
+
+
 class OnBoard:
     """``DebugService``'s on-board half: the launcher's sessions this service opened, and the
     per-session detection. ``svc`` is the ``services.debug.DebugService`` (its state dir, bus,
@@ -538,6 +686,13 @@ class OnBoard:
         self._seen: dict[str, weakref.ref[Any]] = {}
         #: Why the board's OpenOCD is down, when this service knows (the swap), until next up.
         self._closed_for: dict[str, str] = {}
+        #: The via of the session a swap closed, for the reopen after a verified swap.
+        self._reopen_via: dict[str, str] = {}
+
+    def reopen_via(self, board_id: str) -> str:
+        """The via the session closed for a swap had (once); jtag when none."""
+        with self._mu:
+            return self._reopen_via.pop(board_id, VIA_JTAG)
 
     # -- the choice -----------------------------------------------------------------------
 
@@ -548,13 +703,24 @@ class OnBoard:
         with self._mu:
             return self._live.get(board_id)
 
-    def route(self, session: Any) -> Any:
+    def route(self, session: Any, via: str = VIA_JTAG) -> Any:
         """The route to use for ``session``, or None for this PC's OpenOCD (today's path).
         ``debug.on_board = true`` raises what stops the board's route instead of None. Asks
-        the launcher at most once per session (``detect``)."""
+        the launcher at most once per session (``detect``).
+
+        ``via="hostio"`` has no path on this PC: it raises what stops the board's route, as
+        ``true`` does, and refuses before the launcher is asked when the board is not claimed
+        by this Harness Manager or the DUT's pins are not in hostio4 mode."""
         want = self.mode()
+        hostio = via == VIA_HOSTIO
+        if hostio and want == "false":
+            raise RefusedError("hostio debug runs OpenOCD on the board, and the setting "
+                               "debug.on_board is false",
+                               hint="set debug.on_board to auto, then open the hostio session")
         if want == "false":
             return None
+        if hostio:
+            want = "true"
         rt = route_of(session)
         if rt is None:
             if want == "true":
@@ -566,8 +732,17 @@ class OnBoard:
         state, err = rt.plan()
         if state != READY:
             if want == "true":
-                raise err or UnavailableError(CAPABILITY, "this board has no on-board OpenOCD")
+                err = err or UnavailableError(CAPABILITY, "this board has no on-board OpenOCD")
+                if hostio:
+                    err = _hostio_needs_board(err)
+                raise err
             return None
+        if hostio:
+            gate = getattr(rt, "hostio_gate", None)
+            refusal = gate() if callable(gate) else UnavailableError(
+                CAPABILITY, HOSTIO_NO_SUPPORT_WORDS, hint=HOSTIO_NO_SUPPORT_HINT)
+            if refusal is not None:
+                raise refusal
         try:
             det = self.detect(rt, session)
         except HarnessError as exc:
@@ -583,7 +758,24 @@ class OnBoard:
                 raise UnavailableError(CAPABILITY, f"no OpenOCD launcher on the board: {det.why}",
                                        hint=NO_LAUNCHER_HINT)
             return None
+        if hostio:
+            name, flag = self.hostio_design(rt)
+            if flag is False:
+                raise NothingOnTargetError(f"{name} has no hostio",
+                                           hint="use JTAG, or load a nanoSoC-family design")
         return rt
+
+    def hostio_design(self, rt: Any) -> tuple[str, bool | None]:
+        """``(design name, hostio flag)`` of the loaded design from the launcher's ``version``
+        (HM 1.2.1): False = the board says it has no hostio link; None = unknown (no name, no
+        flag): allowed, and the board refuses with ``no_hostio`` if it must."""
+        name = rt.design_name()
+        if not name:
+            return "", None
+        res = rt.run("version", timeout=STATUS_TIMEOUT_S)
+        if res.returncode != RC_OK:
+            return name, None
+        return name, parse_design_hostio(getattr(res, "stdout", ""), name)
 
     def detect(self, rt: Any, session: Any = None) -> _Detected:
         """Does the board have the launcher? ``<launcher> status --json``, once per session;
@@ -679,24 +871,29 @@ class OnBoard:
 
     # -- up ---------------------------------------------------------------------------------
 
-    def up(self, session: Any, rt: Any) -> DebugStatus:
+    def up(self, session: Any, rt: Any, via: str = VIA_JTAG) -> DebugStatus:
         board_id = session.candidate.board_id
         live = self.live(board_id)
         if live is not None:
+            other = (f" via {VIA_WORDS.get(live.status.via, live.status.via)}"
+                     if live.status.via != via else "")
             raise AlreadyError(f"the debug session for {board_id} is already up (OpenOCD on "
-                               "the board)",
+                               f"the board{other})",
                                hint=f"gdb on 127.0.0.1:{live.status.gdb_port}; 'down' first to "
-                                    "restart it")
+                                    "restart it" + (" or to change the via" if other else ""))
         self.check_lease(session)
         rm = rt.design_name() or "auto"
-        self.svc._publish(board_id, "starting", detail=f"{rt.describe()}: up --rm {rm}",
+        word = " --via hostio" if via == VIA_HOSTIO else ""
+        self.svc._publish(board_id, "starting", detail=f"{rt.describe()}: up{word} --rm {rm}",
                           where="board")
-        reply = self._launch(rt, rm)
+        reply = self._launch(rt, rm, via)
         return self._attach(session, rt, reply)
 
-    def _launch(self, rt: Any, rm: str) -> LauncherReply:
+    def _launch(self, rt: Any, rm: str, via: str = VIA_JTAG) -> LauncherReply:
         self._changing(rt)
-        res = rt.run("up", rm=rm, timeout=UP_TIMEOUT_S)
+        # a JTAG up is asked exactly as before (an older board knows no --via)
+        res = (rt.run("up", rm=rm, timeout=UP_TIMEOUT_S, via=VIA_HOSTIO) if via == VIA_HOSTIO
+               else rt.run("up", rm=rm, timeout=UP_TIMEOUT_S))
         reply = parse_reply(res.stdout)
         if reply is None:
             self.forget(rt)
@@ -706,7 +903,7 @@ class OnBoard:
                 hint="the board's launcher and this Harness Manager disagree; `harness-manager "
                      "board ssh TARGET` then `mps3-debug status --json` shows what it says")
         if res.returncode != RC_OK or reply.state not in ("up", "starting"):
-            raise launcher_error("start", res.returncode, reply, rm=rm)
+            raise launcher_error("start", res.returncode, reply, rm=rm, via=via)
         deadline = time.monotonic() + self.svc.start_timeout
         while reply.state == "starting":
             if time.monotonic() > deadline:
@@ -718,7 +915,8 @@ class OnBoard:
             got = rt.run("status", timeout=STATUS_TIMEOUT_S)
             reply = parse_reply(got.stdout) or reply
             if reply.state not in ("up", "starting"):
-                raise launcher_error("start", got.returncode or RC_FAILED, reply, rm=rm)
+                raise launcher_error("start", got.returncode or RC_FAILED, reply, rm=rm,
+                                     via=via)
         return reply
 
     def _attach(self, session: Any, rt: Any, reply: LauncherReply) -> DebugStatus:
@@ -753,11 +951,14 @@ class OnBoard:
             detail += "; it was already running there: attached to it"
         status = DebugStatus(state="up", gdb_port=local[0], config=reply.cfg, pid=reply.pid,
                              detail=detail, gdb_ports=tuple(local), cores=tuple(names),
-                             where="board")
+                             where="board", via=reply.via, capabilities=reply.capabilities,
+                             gdb_init=reply.gdb_init)
         with self._mu:
             self._live[board_id] = _Live(session, rt, reply, status)
         self.svc._publish(board_id, "up", ports={"gdb": local[0]}, pid=reply.pid, detail=detail,
-                          config=reply.cfg, where="board", gdb_ports=list(local), cores=names)
+                          config=reply.cfg, where="board", gdb_ports=list(local), cores=names,
+                          via=reply.via, capabilities=list(reply.capabilities),
+                          gdb_init=list(reply.gdb_init))
         return status
 
     def _quiet_down(self, rt: Any) -> None:
@@ -878,10 +1079,13 @@ class OnBoard:
             return DebugStatus(state="down", where="board", detail=closed_for or SWAP_REASON)
         if reply.state in ("up", "starting"):
             return DebugStatus(state=reply.state, config=reply.cfg, pid=reply.pid, cores=names,
-                               where="board",
+                               where="board", via=reply.via, capabilities=reply.capabilities,
+                               gdb_init=reply.gdb_init,
                                detail=f"OpenOCD runs on the board (pid {reply.pid}, "
-                                      f"{reply.what()}), not opened here: `debug up` forwards "
-                                      "its gdb ports to this PC")
+                                      f"{reply.what()}, via {VIA_WORDS.get(reply.via, reply.via)}), "
+                                      "not opened here: `debug up"
+                                      + (" --via hostio" if reply.via == VIA_HOSTIO else "")
+                                      + "` forwards its gdb ports to this PC")
         if reply.state == "failed":
             return DebugStatus(state="failed", where="board",
                                detail=launcher_error("keep running", RC_FAILED, reply).message)
@@ -971,6 +1175,7 @@ class OnBoard:
             if self._live.get(board_id) is live:
                 self._live.pop(board_id, None)
             self._closed_for[board_id] = SWAP_REASON
+            self._reopen_via[board_id] = live.status.via
         live.route.release()
         self.svc._mark_ended(board_id, pid=live.reply.pid, why="on-board OpenOCD stopped")
         detail = SWAP_REASON if got.ok else \
@@ -986,6 +1191,8 @@ class OnBoard:
         the backstop); being down already, it answers down."""
         live = self.live(board_id)
         if live is not None:
+            with self._mu:
+                self._reopen_via[board_id] = live.status.via
             try:
                 self.down(live.session, reason=SWAP_REASON, explicit=False)
             except HarnessError as exc:
@@ -1015,8 +1222,10 @@ class OnBoard:
             log.warning("debug on-board: closing %s: %s", board_id, exc)
 
 
-__all__ = ["BUSY_HINT", "DOWN_FIRST_DATA", "DOWN_FIRST_HINT", "DownFirst", "LOCK_CAPABILITY",
+__all__ = ["BUSY_HINT", "HOSTIO_CAPABILITIES", "HOSTIO_GDB_INIT", "HOSTIO_LIMITS",
+           "HOSTIO_VERIFY_NOTE", "JTAG_CAPABILITIES", "JTAG_ONLY", "VIAS", "VIA_HOSTIO",
+           "VIA_JTAG", "hostio_error", "DOWN_FIRST_DATA", "DOWN_FIRST_HINT", "DownFirst", "LOCK_CAPABILITY",
            "LauncherReply", "MODES", "ON_BOARD_ENV", "OnBoard", "OnBoardRoute", "SCHEMA",
            "SETTING", "SWAP_DETAIL", "ask_down", "busy_words", "down_first", "has_lock",
-           "launcher_error", "mode", "parse_capabilities", "parse_reply", "ready_route",
+           "launcher_error", "mode", "parse_design_hostio", "parse_capabilities", "parse_reply", "ready_route",
            "route_of", "settle"]
