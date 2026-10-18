@@ -18,7 +18,8 @@ from harness_manager.services.xdc.model import PinModel
 from harness_manager_mps3 import pins
 from tests.fakes.t10_platform import PLATFORM, REPO, git_show, md_boundary, platform_ref
 
-FIELDED = "0x72BB0A36"
+FIELDED = "0xA5856D30"      # the default shell: v2.2 / mint 4
+V21 = "0x72BB0A36"          # the mint-2 shell, still modelled
 
 
 @pytest.fixture(scope="module")
@@ -30,18 +31,21 @@ def test_the_model_is_labelled_derived_until_lane_c_lands(model):
     st = model.status
     assert st["derived"] is True and st["lane_c"] is False
     assert "DERIVED" in st["label"] and "board_pins.yaml" in st["label"]
-    assert st["platform_ref"] == "feat/rm-ila-mint"
+    assert len(st["platform_ref"]) == 40 and st["platform_ref"] == st["platform_commit"]
     assert len(st["platform_commit"]) == 40
 
 
-def test_the_fielded_shells_boundary_is_47_ports_148_bits_20_intfs(model):
+def test_the_fielded_shells_boundary_is_54_ports_260_bits_24_intfs(model):
     b = model.shell(FIELDED)["rp_boundary"]
-    assert b["totals"] == {"ports": 47, "bits": 148, "decoupler_intfs": 20}
+    assert b["totals"] == {"ports": 54, "bits": 260, "decoupler_intfs": 24}
     sigs = model.boundary(FIELDED)
-    assert len(sigs) == 47 and sum(s.width for s in sigs) == 148
+    assert len(sigs) == 54 and sum(s.width for s in sigs) == 260
     assert model.boundary_groups() == ["clkrst", "jtag", "dbgbscan", "eth", "uart", "status",
-                                       "gpio", "qspi"]
+                                       "gpio", "qspi", "hostio"]
     assert model.default_shell == FIELDED
+    # twin: the mint-2 shell keeps its own 47 / 148 boundary, without the hostio group
+    assert model.shell(V21)["rp_boundary"]["totals"] == {"ports": 47, "bits": 148, "decoupler_intfs": 20}
+    assert len(model.boundary(V21)) == 47 and "hostio" not in model.boundary_groups(V21)
     # a shell the model does not describe is an AbsentError, not a silent fallback
     with pytest.raises(Exception, match="no shell"):
         model.shell("0x3F1A560F")
@@ -107,7 +111,7 @@ def test_the_catalogue_lists_the_builtin_designs():
     names = {d["name"]: d["kit"] for d in cat["designs"]}
     assert names == {"minimal": "rm-kit", "nanosoc": "rm-kit", "nanosoc_ila": "rm-kit",
                      "blinky": "board", "shield_gpio": "board", "harness_shell": "board"}
-    assert cat["model"]["shells"][FIELDED]["totals"]["ports"] == 47
+    assert cat["model"]["shells"][FIELDED]["totals"]["ports"] == 54
 
 
 # --- drift against the platform repo -----------------------------------------------------------

@@ -172,8 +172,14 @@ def from_doc(doc: Any, *, origin: str = "", base_dir: Path | None = None) -> Des
                      "starting file, run rm-kit once without the \"wrapper\" field: it writes "
                      "a wrapper skeleton you can copy and edit") from exc
         try:
-            d.wrapper_ports = parse_ansi_ports(text, doc.get("module"),
-                                               params=doc.get("params") or {"NGPIO": 16})
+            try:
+                # the wrapper's own `#(parameter int NGPIO = 48)` default wins unless the design
+                # file sets "params"; a bare [NGPIO-1:0] with no default reads as the pre-mint-4 16
+                d.wrapper_ports = parse_ansi_ports(text, doc.get("module"), params=doc.get("params"))
+            except ValueError:
+                if doc.get("params"):
+                    raise
+                d.wrapper_ports = parse_ansi_ports(text, doc.get("module"), params={"NGPIO": 16})
         except ValueError as exc:
             raise UsageError(f"wrapper {path.name}: {exc}",
                              hint="the reader takes an ANSI-style module header") from exc

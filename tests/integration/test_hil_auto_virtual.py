@@ -32,7 +32,7 @@ from harness_manager.cli.main import main as hm_main
 from tests.fakes.hil_auto import HubProbe, InProcessHm, is_write, verb_of
 
 BOARD = "192.168.10.101"
-LX_STATIC = 0x44EE76D5
+LX_STATIC = 0xA5856D30
 
 
 def state_dir() -> Path:

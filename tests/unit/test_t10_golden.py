@@ -80,10 +80,13 @@ def test_the_semantic_comparison_catches_a_dropped_false_path():
 
 
 def test_the_harness_shell_export_places_every_pad_the_fielded_shell_places():
+    # the design is 0x72BB0A36's own pads, so it is compared at that shell's commit (the v2.2
+    # shell places ten more: USB_DACK/INT/nCS and the seven USD_* nets)
+    ref = MODEL["shells"]["0x72BB0A36"]["platform"]["commit"]
     theirs: dict[str, tuple[str, str]] = {}
     for path in ("fpga/shell/constraints/mps3_harness.xdc",
                  "fpga/shell/constraints/optional/mps3_harness_touch.xdc"):
-        ports, _ = xdc.hdl.parse_xdc_pins(git_show(REF, path))
+        ports, _ = xdc.hdl.parse_xdc_pins(git_show(ref, path))
         theirs |= {n: (p.pin, p.iostandard) for n, p in ports.items() if p.pin}
     kit = xdc.export("mps3", "board", "harness_shell")
     assert kit.ok

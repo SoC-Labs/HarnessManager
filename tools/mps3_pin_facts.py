@@ -195,6 +195,27 @@ CONNECTIVITY: list[dict] = [
      "cite": ("fpga/shell/shell_top.sv", "the pad sample driven straight back to the RP")},
 ]
 
+#: Connectivity facts for a shell whose boundary has the mint-4 ``hostio`` group (NGPIO 48):
+#: applied on top of ``CONNECTIVITY`` only for such a shell, since an earlier static has no
+#: such signals.
+_HOSTIO_PD = ("docs/contracts/partition-pins.md", "| `hostio_ioreq1_o` | yes | 1 | P1[0] | 0 |")
+_UPPER = ("docs/contracts/partition-pins.md", "lanes 16-31 go to\n`SH0_IO[15:0]`")
+HOSTIO_CONNECTIVITY: list[dict] = [
+    {"signal": n, "static": f"hostio_bridge_0 (AXI4-Lite 0x44BD_0000) hostio4 target: {what}",
+     "via": "hostio4 link (`harness-manager` hostio mode)", "cite": _HOSTIO_PD}
+    for n, what in [("hostio_ioreq1_o", "IOREQ1 from the RM"), ("hostio_ioreq2_o", "IOREQ2 from the RM"),
+                    ("hostio_iodata_o", "IODATA drive from the RM"), ("hostio_iodata_oe_o", "IODATA output enable from the RM"),
+                    ("hostio_ioack_i", "IOACK to the RM"), ("hostio_iodata_i", "IODATA sampled to the RM"),
+                    ("hostio_mode_i", "HOSTIO.CTRL.MODE, latched while rp_resetn is low")]
+]
+for _sig, _what in [("dut_gpio_o", "drive"), ("dut_gpio_oe", "output enable"), ("dut_gpio_i", "pad sample")]:
+    HOSTIO_CONNECTIVITY.append(
+        {"signal": _sig, "bits": [31, 16], "static": f"fixed 1:1 lane map, {_what}: lane {{i}} <-> SH0_IO[{{i-16}}] (gated by SH_HI_EN)",
+         "via": "Arduino shield 0 / SH0 Pmod pins", "board_net": "SH0_IO[{i-16}]", "cite": _UPPER})
+    HOSTIO_CONNECTIVITY.append(
+        {"signal": _sig, "bits": [47, 32], "static": f"fixed 1:1 lane map, {_what}: lane {{i}} <-> SH1_IO[{{i-32}}] (gated by SH_HI_EN)",
+         "via": "Arduino shield 1 / SH1 Pmod pins", "board_net": "SH1_IO[{i-32}]", "cite": _UPPER})
+
 #: The clocks the shell drives across the boundary (partition-timing.md table).
 #: ``declare``: always (every RM OOC XDC declares it), when_timed (when the design times
 #: that clock's group, e.g. a MAC on the RMII group), on_request (only when the design
@@ -222,6 +243,19 @@ BOUNDARY_CLOCKS: list[dict] = [
      "static_clock": "(none: firmware bit-banged, kHz-class; an OOC-only clock for SW-DP logic)",
      "cite": ("docs/contracts/partition-timing.md", "| `jtag_tck` | *(none)* |")},
 ]
+
+#: Boundary-clock facts that differ for one shell (``sid`` -> signal -> replacing keys, with
+#: its own ``cite``). v2.2 (0xA5856D30): ``jtag_tck`` is no longer "no clock in the static";
+#: the static generates ``jtag_bb_tck`` on the jtag_bb drive flop (partition-timing.md). The
+#: RM-side OOC clock is unchanged (OOC-only, slow), so period/waveform/declare stay.
+SHELL_BOUNDARY_CLOCKS: dict[str, dict[str, dict]] = {
+    "0xA5856D30": {
+        "jtag_tck": {
+            "static_clock": "jtag_bb_tck (generated on jtag_bb_0/inst/drive_q_reg[0]/Q in the static; "
+                            "an OOC-only clock for SW-DP logic in the RM)",
+            "cite": ("docs/contracts/partition-timing.md", "| `jtag_tck` | `jtag_bb_tck`")},
+    },
+}
 
 #: RP pblock facts for the fielded static.
 PBLOCK: list[dict] = [
@@ -266,6 +300,22 @@ SHELL_PBLOCK: dict[str, list[dict[str, Any]]] = {
         {"key": "dut_clk_hd_clk_src", "value": "BUFGCE_X2Y47",
          "cite": ("fielded/0x44EE76D5/README.md",
                   "**`dut_clk` enters the partition from `BUFGCE_X2Y47`.**")},
+    ],
+    # v2.2 / mint 4 (shape A, 20 clock regions). Facts the platform repo does not state for
+    # the new partition are DROPPED (``drop``), never carried over from the old box:
+    # slice_range (no measured SLICE bounding box), reference_use (its denominators were the
+    # old 42,824 LUT), dut_clk_hd_clk_src (the mint-4 CLKCTL BUFGCE site is not recorded).
+    "0xA5856D30": [
+        {"key": "clock_regions",
+         "value": [f"X{x}Y{y}" for y in range(5) for x in range(4)],
+         "cite": ("fpga/dfx/dfx_floorplan.xdc", "set rp_regions {X0Y0 X1Y0 X2Y0 X3Y0  X0Y1")},
+        {"key": "capacity", "value": {"LUT": 214080, "FF": 428160, "CLB": 26760, "DSP": 2160},
+         "cite": ("fpga/dfx/dfx_floorplan.xdc", "26,760 SLICE = 214,080 LUT, 720 RAMB36, 2160 DSP")},
+        {"key": "bram_tiles", "value": 720,
+         "cite": ("fpga/dfx/dfx_floorplan.xdc", "26,760 SLICE = 214,080 LUT, 720 RAMB36, 2160 DSP")},
+        {"key": "slice_range", "drop": True},
+        {"key": "reference_use", "drop": True},
+        {"key": "dut_clk_hd_clk_src", "drop": True},
     ],
 }
 

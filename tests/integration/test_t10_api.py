@@ -2,7 +2,7 @@
 
 ``xdc_api`` is loaded through ``app.EXTENSIONS`` (CCR T10-1). The board routes read only
 the static the board reported when probed: the default virtual board runs the previous
-shell 0x3F1A560F, the ILA-mint profile runs the fielded 0x72BB0A36 the pin model describes.
+shell 0x3F1A560F, the mint-4 profile runs the v2.2 0xA5856D30 the pin model describes.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ with warnings.catch_warnings():
 
 from harness_manager.daemon import app as daemon_app
 from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
-from tests.fakes.virtual_board import VirtualMps3, ila_mint_bake_profile
+from tests.fakes.virtual_board import VirtualMps3, linux_mint4_profile
 
 H = headers()
 
@@ -43,7 +43,7 @@ def old_board(vboard) -> Iterator[tuple[TestClient, str]]:
 
 @pytest.fixture
 def fielded_board(tmp_path) -> Iterator[tuple[TestClient, str]]:
-    with VirtualMps3(tmp_path / "ila", profile=ila_mint_bake_profile()) as vb:
+    with VirtualMps3(tmp_path / "v22", profile=linux_mint4_profile(0xA5856D30)) as vb:
         yield from client_for(vb)
 
 
@@ -52,7 +52,7 @@ def test_the_catalogue_needs_no_board(old_board):
     r = c.get("/api/v1/xdc", headers=H)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["ok"] and body["model"]["default_shell"] == "0x72BB0A36"
+    assert body["ok"] and body["model"]["default_shell"] == "0xA5856D30"
     assert {d["name"] for d in body["designs"]} >= {"nanosoc", "blinky"}
     assert c.get("/api/v1/xdc").status_code == 401            # the bearer rule holds
 
@@ -61,7 +61,7 @@ def test_the_board_catalogue_says_which_static_the_board_runs(old_board, fielded
     c, bid = old_board
     b = c.get(bid_path(bid) + "/xdc", headers=H).json()["board"]
     assert b["static_id"].lower() == "0x3f1a560f" and b["matches"] is False
-    assert "0x72BB0A36" in b["reason"]
+    assert "0xA5856D30" in b["reason"]
     c2, bid2 = fielded_board
     b2 = c2.get(bid_path(bid2) + "/xdc", headers=H).json()["board"]
     assert b2["matches"] is True and b2["reason"] == ""
@@ -75,7 +75,7 @@ def test_preview_returns_the_files_and_the_checks(fielded_board):
     body = r.json()
     assert body["ok"] is True and body["passed"] is True and "nanosoc_ooc.xdc" in body["files"]
     assert "create_clock -name dut_clk" in body["files"]["nanosoc_ooc.xdc"]
-    assert body["design"]["static_id"] == "0x72BB0A36"
+    assert body["design"]["static_id"] == "0xA5856D30"
 
 
 def test_an_rm_kit_for_a_board_on_another_static_is_refused_with_the_reason(old_board):

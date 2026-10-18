@@ -35,7 +35,7 @@ from typing import Any
 READ, SAFE, MANUAL = "read", "safe", "manual"
 
 #: The runbooks' statics (``--expect-static`` overrides; a new mint changes them).
-LINUX_STATIC = "0x44ee76d5"      # RC2, HIL_LINUX.md "The board"
+LINUX_STATIC = "0xa5856d30"      # v2.2 (mint 4); was RC2 0x44ee76d5 (v2.1), HIL_LINUX.md "The board"
 BARE_METAL_STATIC = "0x72bb0a36"  # the ILA mint, HIL_B0.md "The board as of 09-24"
 GREYBOX_RM = "0x00000000"
 

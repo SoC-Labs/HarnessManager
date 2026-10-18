@@ -16,6 +16,9 @@ API (docs/API.md says what changed).
   also come in a macOS form (`shasum -a 256`, BSD `find`) that prints the same sha256; the app,
   the command line and `error.data.unsigned.how_macos` show both.
 - Install: Harness Manager now installs the platform's published pyverify wheel, named by exact version and sha256 in `pyverify.pin`, instead of a copy kept in the repository. The installer checks the sha256 and stops, naming the url and both hashes, if it differs or the download fails; a wheelhouse (`--offline`) still installs with no network.
+- The XDC export, the RM kit (`xdc rm-kit`) and the pin facts now model the v2.2 static `0xA5856D30` (mint 4) and default to it: a 54-port, 260-bit boundary with `NGPIO` 48 and the 16-bit `hostio` group (earlier statics keep their 47 ports / 148 bits).
+- `xdc rm-kit`: a wrapper that declares `parameter int NGPIO = 48` is now read at 48 lanes (it was read as 16 whatever it declared, so the kit's own skeleton failed its port check on a v2.2 static).
+- The Checks (`harness-manager checks`, HIL_AUTO) now expect the v2.2 Linux static `0xa5856d30` by default (was `0x44ee76d5`); `--expect-static` still overrides.
 
 ## 1.2.0 (unreleased)
 

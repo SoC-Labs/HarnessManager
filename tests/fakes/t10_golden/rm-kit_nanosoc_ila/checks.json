@@ -13,6 +13,6 @@
   "reason": "not used by this design: tie the outputs to their safe-idle value (the skeleton does)",
   "severity": "note",
   "src": "",
-  "subject": "eth"
+  "subject": "eth, hostio"
  }
 ]

@@ -48,10 +48,10 @@ def run(argv: list[str], capsys) -> tuple[int, str, str]:
 def test_info_names_the_model_the_shell_and_the_sources(capsys):
     code, out, _ = run(["xdc", "info"], capsys)
     assert code == 0
-    assert "DERIVED" in out and "0x72BB0A36 (fielded): 47 ports, 148 bits, 20 decoupler" in out
+    assert "DERIVED" in out and "0xA5856D30 (fielded): 54 ports, 260 bits, 24 decoupler" in out
     assert "nanosoc" in out and "fpga/shell/boundary.yaml" in out
     code, out, _ = run(["xdc", "info", "--json"], capsys)
-    assert json.loads(out)["model"]["default_shell"] == "0x72BB0A36"
+    assert json.loads(out)["model"]["default_shell"] == "0xA5856D30"
 
 
 def test_rm_kit_writes_the_files_and_the_manifest(tmp_path: Path, capsys):
@@ -61,7 +61,7 @@ def test_rm_kit_writes_the_files_and_the_manifest(tmp_path: Path, capsys):
     assert names == ["manifest.json", "nanosoc_connectivity.csv", "nanosoc_connectivity.md",
                      "nanosoc_ooc.xdc", "nanosoc_pblock.md", "nanosoc_wrapper_skeleton.sv"]
     man = json.loads((tmp_path / "manifest.json").read_text())
-    assert man["passed"] and man["facts"]["static_id"] == "0x72BB0A36"
+    assert man["passed"] and man["facts"]["static_id"] == "0xA5856D30"
     assert man["facts"]["model"]["derived"] is True
 
 
