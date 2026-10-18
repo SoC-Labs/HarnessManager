@@ -109,3 +109,19 @@ def test_rm_kit_for_an_older_static_keeps_its_own_counts(sid, tmp_path: Path, ca
     assert "47 ports, 148 bits, 20 decoupler interfaces" in (tmp_path / "minimal_connectivity.md").read_text()
     wrap = (tmp_path / "minimal_wrapper_skeleton.sv").read_text()
     assert "NGPIO = 16" in wrap and "hostio" not in wrap
+
+
+def test_a_wrapper_with_16_gpio_lanes_fails_the_v22_width_check_and_a_48_lane_one_passes(tmp_path: Path):
+    from harness_manager.services import xdc
+
+    skel = xdc.export("mps3", "rm-kit", "nanosoc").files["nanosoc_wrapper_skeleton.sv"]
+    assert "NGPIO = 48" in skel
+    design = tmp_path / "d.json"
+    design.write_text(json.dumps({"kind": "rm", "name": "mine", "wrapper": "w.sv", "use": {"clkrst": {}}}))
+    (tmp_path / "w.sv").write_text(skel)
+    assert xdc.export("mps3", "rm-kit", str(design)).ok
+    # twin: the same wrapper, pre-mint-4 (16 lanes)
+    (tmp_path / "w.sv").write_text(skel.replace("NGPIO = 48", "NGPIO = 16"))
+    bad = xdc.export("mps3", "rm-kit", str(design))
+    assert not bad.ok and {e.code for e in bad.errors} == {"width"}
+    assert "16 bits in the RM, 48 on the boundary" in bad.errors[0].reason

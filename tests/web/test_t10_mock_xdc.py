@@ -44,7 +44,7 @@ def path(tail: str) -> str:
 
 
 def test_the_catalogue_and_the_board_static(client):
-    assert client.get("/api/v1/xdc", headers=H).json()["model"]["default_shell"] == "0x72BB0A36"
+    assert client.get("/api/v1/xdc", headers=H).json()["model"]["default_shell"] == "0xA5856D30"
     b = client.get(path("/xdc"), headers=H).json()["board"]
     assert b["matches"] is False and b["static_id"].lower() == "0x3f1a560f"   # the demo shell
 
