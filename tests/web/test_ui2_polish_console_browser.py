@@ -316,6 +316,42 @@ def test_picking_a_console_in_the_switcher_gives_it_the_keyboard(showcase):  # n
     assert written(eng, BOARD_LINUX, n, "uart0") == b""
 
 
+# The console socket of one console opens late (a slow network, a busy daemon, a slow CI runner).
+SLOW_SOCKET = """(() => { const R = window.WebSocket;
+function DWS(url) { const self = this; this.readyState = 0; this.binaryType = 'arraybuffer'; this.url = url;
+  const go = () => { const r = new R(url); r.binaryType = self.binaryType;
+    r.onopen = (e) => { self.readyState = 1; self.onopen && self.onopen(e); };
+    r.onmessage = (e) => { self.onmessage && self.onmessage(e); };
+    r.onclose = (e) => { self.readyState = 3; self.onclose && self.onclose(e); };
+    self._r = r; };
+  if (url.includes('/uart1')) setTimeout(go, %d); else go(); }
+DWS.prototype.send = function (d) { if (this._r) this._r.send(d); };
+DWS.prototype.close = function () { if (this._r) this._r.close(); };
+DWS.CONNECTING = 0; DWS.OPEN = 1; DWS.CLOSING = 2; DWS.CLOSED = 3;
+window.WebSocket = DWS; })();"""
+
+
+def test_keys_typed_before_a_picked_console_has_connected_arrive_in_order(showcase):  # noqa: F811
+    """The first keys after picking a console that was never opened wait for its socket, not vanish."""
+    eng = showcase.engine
+    page = spy_page(showcase)
+    page.add_init_script(SLOW_SOCKET % 1500)
+    page.reload()
+    page.wait_for_selector(".board-item", timeout=T)
+    nav.open_board(page, BOARD_LINUX)
+    nav.tab(page, "workbench")
+    page.wait_for_selector('[data-testid="console-state"]:has-text("up")', timeout=T)
+    page.locator('[data-console-tab="uart1"]').click()
+    expect(page.locator('[data-testid="terminal"] textarea.xterm-helper-textarea')).to_be_focused(timeout=T)
+    assert page.evaluate("(b) => window.__harness_managerConsoles.state(b, 'uart1')", BOARD_LINUX) == "connecting"
+    n = len(eng.consoles.writes)
+    page.keyboard.type("ab")                  # typed while uart1's socket is still connecting
+    page.keyboard.press("Control+d")
+    assert wait_until(lambda: written(eng, BOARD_LINUX, n, "uart1") == b"ab\x04", page=page)
+    assert written(eng, BOARD_LINUX, n, "uart0") == b""
+    assert page.errors == []
+
+
 # --- 7. a paste goes whole; the daemon paces it, never the page ----------------------------------------------
 
 

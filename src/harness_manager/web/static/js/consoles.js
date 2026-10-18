@@ -30,6 +30,7 @@ import { Terminal } from "../vendor/xterm/xterm.module.js";
 const sessions = new Map();
 const encoder = new TextEncoder();
 const CR = /\r/g;
+const PENDING_MAX = 65536;     // bytes kept for a socket that is still connecting
 
 function termTheme() {
   return {
@@ -61,6 +62,7 @@ export class ConsoleSession {
     this.ws = null;
     this.opened = false;
     this.closedByUs = false;
+    this.pending = [];         // keys typed while the socket was still connecting (sent, in order, once it says "state")
     this.term = new Terminal({
       convertEol: true,
       cursorBlink: true,
@@ -90,11 +92,35 @@ export class ConsoleSession {
   // What the keyboard gives (a key, or a paste): Enter, and each CR of a paste, is the ending.
   type(text) {
     if (!this.writable) return;
-    const why = this.send(encoder.encode(text.replace(CR, this.ending)));
+    const bytes = encoder.encode(text.replace(CR, this.ending));
+    // A console just picked in the switcher is still connecting for a moment: the first keys
+    // wait for it (in order) rather than being dropped.
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING && !(this.input && !this.input.writable)) {
+      if (this.pendingBytes() + bytes.length <= PENDING_MAX) {
+        this.pending.push(bytes);
+        return;
+      }
+    }
+    const why = this.send(bytes);
     if (why !== this.lastRefusal) {
       this.lastRefusal = why;
       if (why) log("warning", "console", `${this.name}: a key was not sent: ${why}`, this.bid);
     }
+  }
+
+  pendingBytes() { return this.pending.reduce((n, b) => n + b.length, 0); }
+
+  // The socket has said how things stand: send what was typed meanwhile, or drop it (read-only,
+  // or the socket went away), and say so.
+  flushPending() {
+    if (!this.pending.length) return;
+    const queued = this.pending;
+    this.pending = [];
+    const bytes = new Uint8Array(queued.reduce((n, b) => n + b.length, 0));
+    let at = 0;
+    for (const b of queued) { bytes.set(b, at); at += b.length; }
+    const why = this.send(bytes);
+    if (why) log("warning", "console", `${this.name}: a key was not sent: ${why}`, this.bid);
   }
 
   // xterm's keydown/keyup filter: true lets xterm turn the key into bytes for the board.
@@ -149,9 +175,13 @@ export class ConsoleSession {
         if (f.input && typeof f.input === "object") {
           this.input = { role: f.input.role || "", writable: f.input.writable !== false,
             read_only_reason: f.input.read_only_reason || "" };
+          if (!this.input.writable) this.pending = [];
           changed();
         }
-        if (f.state) this.setState(f.state, f.detail || "");
+        if (f.state) {
+          this.setState(f.state, f.detail || "");
+          this.flushPending();
+        }
         if (f.dropped) {
           this.dropped += Number(f.dropped) || 0;
           log("warning", "console", `${this.name}: the daemon dropped ${f.dropped} bytes (this page fell behind)`, this.bid);
@@ -180,6 +210,9 @@ export class ConsoleSession {
     };
     ws.onclose = (ev) => {
       this.ws = null;
+      const lost = this.pending.length;
+      this.pending = [];
+      if (lost && !this.closedByUs) log("warning", "console", `${this.name}: a key was not sent: the console is not connected`, this.bid);
       if (this.closedByUs) return;
       const why = socketCloseReason(ev, opened);
       if (this.state === "closed" || (ev.code === 1000 && opened)) {
