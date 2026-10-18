@@ -33,7 +33,10 @@ EDITIONS: dict[str, dict[str, str]] = {
 #: tier a launch reports (``launch.Launch.tier``) is compared with it.
 FREE_TIER = {"2026.1": "BASIC", "2024.1": "STANDARD"}
 #: The statics whose IP was checked (every instance no-charge "Included" IP; no ILA or VIO).
-IP_FREE_STATICS = frozenset({0x72BB0A36, 0x44EE76D5})
+IP_FREE_STATICS = frozenset({0x72BB0A36, 0x44EE76D5,
+                             # v2.2 / mint 4: report_ip_status (Vivado 2026.1) on the mint's shell
+                             # project, 18 Oct 2026: all 125 IP "Included", none Purchase/Evaluation
+                             0xA5856D30})
 
 
 def device_of(part: str) -> str:
