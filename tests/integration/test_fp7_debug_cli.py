@@ -197,7 +197,7 @@ def test_debug_status_on_the_board_drops_this_pcs_openocd_line(cli, capsys):
     body = json.loads(run_cli(capsys, "--json", "debug", "status", "127.0.0.1")[1])
     assert body["openocd"] == REPORT
     row = run_cli(capsys, "--tsv", "debug", "status", "127.0.0.1")[1].strip().splitlines()[-1]
-    assert row.split("\t")[-5:-2] == ["board", "53663", "cpu0"]   # then VIA, CAPABILITIES (1.2.1)
+    assert row.split("\t")[-3:] == ["board", "53663", "cpu0"]
 
 
 def test_twin_this_pcs_path_keeps_the_openocd_line(cli, capsys):

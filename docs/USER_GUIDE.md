@@ -1193,50 +1193,6 @@ On the board, OpenOCD's telnet and Tcl ports stay on the board: HM forwards gdb 
   OpenOCD may then still drive JTAG during the reconfiguration. An idle one stops by itself
   after 2 hours on the board.
 
-**Debug via hostio (a preview in 1.2.1): memory read/write and image load over the DUT's
-hostio pins.** Instead of JTAG, the board's OpenOCD can reach the DUT over its hostio4 link.
-It reads and writes memory and loads images; **halt, step, registers and breakpoints need
-JTAG**. It is a preview: it needs the board software from the platform's v2.2.1 and has not
-been proven on every board yet. In the app, **Debug** has a choice, **JTAG** (the default) or
-**hostio (memory only, preview)**; on the command line it is `debug up TARGET --via hostio`
-(`--via jtag` is the default; `--via ssh:HOST` and `--via hub` still name the board's route).
-It needs three things, checked before anything is sent to the board:
-
-1. The board is a Linux board **you claimed** (12.1), with OpenOCD on the board (`debug.on_board`
-   `auto` or `true`). hostio has no path on this PC.
-2. The DUT's pins are in **hostio4 mode**: in Consoles press **Switch to hostio4**, then load
-   the design again so it takes effect. In console mode (or when hostio4 is only chosen and not
-   yet loaded) the hostio choice is disabled and says why; the command line exits 15 with the
-   same words.
-3. The loaded design has a hostio link (the nanoSoC family: nanosoc, nanosoc_upy,
-   nanosoc_iice, nanosoc_multicore, ...), and the DUT is running (not held in reset). The board says which
-   designs have one; for a design that has none the choice is disabled ("<design> has no hostio").
-
-The board runs one debug session at a time: while a JTAG session is up, hostio is refused
-(exit 4, "a JTAG debug session is already up on the board"), and the other way round.
-`debug down` stops either. A session that a swap closes reopens by the same path.
-`debug status` and the Debug card show **via** and what the session can do (`can`); on hostio
-they list only `mem_read mem_write load`, and Halt, Step, Registers and Breakpoints show as
-disabled with the reason "hostio debug reads and writes memory and loads images; halt, step,
-registers and breakpoints need JTAG". hostio has one core (cpu0), also for nanosoc_multicore.
-
-**gdb over hostio.** The `attach` line has two more commands, which hostio needs (without them
-gdb asks for a register the link cannot read and drops):
-
-```bash
-arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "set remote p-packet off" -ex "set remote P-packet off" -ex "target extended-remote 127.0.0.1:23344"
-```
-
-If you start gdb another way, send `set remote p-packet off` and `set remote P-packet off`
-before `target extended-remote`. `load` and `x/4wx ADDRESS` work. **hostio cannot verify an
-image in place** (`verify_image` does not work): to check a load, read it back with
-`dump_image FILE ADDRESS SIZE` (OpenOCD) and compare the file, or check words with
-`x/4wx ADDRESS`. If hostio is refused, the message says what to do; for example "the DUT's
-pins are in console mode, so hostio debug is not available" (press Switch to hostio4, load
-the design again), "the DUT is held in reset (or cut off from the board), so its hostio link
-is not running" (load the design), or "another client holds the board's control connection
-(port 6900)" (close the other client, for example another Harness Manager).
-
 **This PC's OpenOCD: needs** OpenOCD 0.12 or later, built with the **remote_bitbang**
 adapter, on your PATH or in `tools.openocd`. The MPS3 target configs ship with Harness Manager.
 
@@ -1262,7 +1218,7 @@ Debug tile has **Start** and **Stop**.
 | Command | What it does |
 |---|---|
 | `debug detect TARGET` | the TAP IDCODE (exit 13: the design has no debug port) |
-| `debug up TARGET [--via hostio]` | start OpenOCD, print the ports and the gdb line (`attach`), hold until Ctrl-C; `--via hostio` is the preview above (default `--via jtag`) |
+| `debug up TARGET` | start OpenOCD, print the ports and the gdb line (`attach`), hold until Ctrl-C |
 | `debug status TARGET` | state, ports, config, pid, and which OpenOCD (does it have remote_bitbang?; not printed when OpenOCD runs on the board) |
 | `debug down TARGET` | stop it |
 

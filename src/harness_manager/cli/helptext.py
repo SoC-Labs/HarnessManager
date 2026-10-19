@@ -164,7 +164,7 @@ console TARGET NAME --export PORT [--for SECONDS]
     Exit 5 if the port is taken. An unknown NAME exits 3 and lists the names."""
 
 DEBUG = """\
-debug up TARGET [--via jtag|hostio] [--for SECONDS]
+debug up TARGET [--for SECONDS]
     Start OpenOCD for the loaded design, print the local gdb/telnet/tcl ports
     (127.0.0.1) and the gdb command line (attach), and keep it up until
     Ctrl-C, `detach`, or --for elapses. This process owns the server and holds
@@ -181,16 +181,6 @@ Connect gdb with the attach line: arm-none-eabi-gdb -ex "set remotetimeout 60"
 needed through a hub or a claimed board's SSH (gdb's 2 s default times out
 there) and harmless on a desk board. Arm DS uses the same port through its
 "Generic GDB" connection. A two-core design prints one attach line per core.
-
---via hostio is a preview in 1.2.1: memory read/write and image load over the
-DUT's hostio pins, instead of JTAG. Halt, step, registers and breakpoints need
-JTAG. It needs a board you have claimed, the DUT's pins in hostio4 mode
-(Consoles: "Switch to hostio4", then load the design again) and OpenOCD on the
-board; otherwise it exits 15 with the reason, before anything is sent. One
-session at a time: `debug down` stops either. Its attach line also sends
-"set remote p-packet off" and "set remote P-packet off", which hostio needs.
-hostio cannot verify an image in place: read it back with dump_image and
-compare, or check words with x/4wx ADDRESS.
 
 Where OpenOCD runs (the setting debug.on_board): auto runs it ON a claimed
 Linux board whose image has mps3-debug (gdb reaches it through the board's

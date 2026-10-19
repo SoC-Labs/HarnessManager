@@ -12,9 +12,9 @@
 // The Logic analysers card (sections/xvc.js) sits under it in the rail.
 
 import { gateReason, interlock, panelState, runAction, runJob } from "../actions.js";
-import { ENDPOINTS, call, toApiError, unwrapDebug } from "../api.js";
+import { call, unwrapDebug } from "../api.js";
 import { clock } from "../format.js";
-import { html, useEffect, useState } from "../lib.js";
+import { html, useEffect } from "../lib.js";
 import { boardState, changed, loadDebug } from "../store.js";
 import { CopyButton, Icon, ResultBlock, Spinner } from "../ui.js";
 import { holderOnly } from "../week.js";
@@ -28,33 +28,6 @@ export const WHERE_TEXT = {
   host: "OpenOCD runs on this PC (on the board's JTAG port, 6921)",
 };
 
-// HM 1.2.1 (preview): "Debug via": JTAG, or the DUT's hostio pins (memory and load only). The
-// status carries `via` ("jtag" when absent), `capabilities` (the full JTAG set when absent) and
-// `gdb_init` (the commands gdb gets before `target extended-remote`; hostio needs the two
-// p-packet ones). Halt, step, registers and breakpoints are JTAG-only: on hostio they show
-// disabled, with HOSTIO_LIMITS beside them.
-export const VIA_LABEL = { jtag: "JTAG", hostio: "hostio (memory only, preview)" };
-export const HOSTIO_LIMITS = "hostio debug reads and writes memory and loads images; halt, step, registers and breakpoints need JTAG";
-export const HOSTIO_MODE_GATE = "the DUT's pins are in console mode: press \"Switch to hostio4\" (Consoles), then load the design again";
-export const HOSTIO_PENDING_GATE = "hostio4 takes effect at the next design load: load the design again";
-export const HOSTIO_NO_SUPPORT_GATE = "this board has no hostio support";
-export const JTAG_CAPS = ["mem_read", "mem_write", "load", "halt", "step", "breakpoints", "registers", "reset"];
-export const CAP_CONTROLS = [["halt", "Halt"], ["step", "Step"], ["registers", "Registers"], ["breakpoints", "Breakpoints"]];
-
-export function capsOf(st) {
-  return Array.isArray(st && st.capabilities) ? st.capabilities : JTAG_CAPS;
-}
-
-// Why "hostio" cannot be chosen now ("" when it can), from the hostio view (GET .../hostio).
-export function hostioGate(view, failed, design) {
-  if (failed) return HOSTIO_NO_SUPPORT_GATE;
-  // the board's launcher says the running design has no hostio link (absent/null = unknown: allowed)
-  if (design && design.hostio === false) return `${design.design} has no hostio`;
-  if (!view) return "";
-  if (view.mode === "hostio4") return "";
-  return view.pending === "hostio4" ? HOSTIO_PENDING_GATE : HOSTIO_MODE_GATE;
-}
-
 // Each core's [name, local gdb port]: `gdb_ports`/`cores` (DEBUG-ONBOARD), else core 0's port.
 export function gdbPorts(st) {
   if (!st) return [];
@@ -67,21 +40,11 @@ export function gdbCmdFor(port) {
   return `arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:${port}"`;
 }
 
-// HM 1.2.1: the same line with the session's `gdb_init` commands (hostio: the two p-packet
-// ones) before the connect, as services/debug.py gdb_command(gdb_init=...) builds it.
-export function gdbCmdWith(port, st) {
-  const init = ((st && Array.isArray(st.gdb_init)) ? st.gdb_init : []).map((c) => `-ex "${c}" `).join("");
-  return gdbCmdFor(port).replace('-ex "target extended', `${init}-ex "target extended`);
-}
-
 function statusLines(st) {
   if (!st || typeof st !== "object") return [{ kind: "out", text: String(st) }];
   const out = [{ kind: st.state === "up" ? "ok" : "out", text: `state   ${st.state}` }];
   if (st.state === "up" || st.where === "board") {
     out.push({ kind: "out", text: `where   ${WHERE_TEXT[st.where || "host"] || st.where}` });
-  }
-  if (st.state === "up" || st.state === "starting") {
-    out.push({ kind: "out", text: `via     ${VIA_LABEL[st.via || "jtag"] || st.via}` });
   }
   if (st.state === "up") {
     const cores = gdbPorts(st);
@@ -122,11 +85,8 @@ export function debugSpecs(bid) {
     },
   };
   const up = {
-    key: "up", label: "Open session", busyLabel: "Opening...", budgetS: 60,
-    command: b.debugVia === "hostio" ? "debug up --via hostio" : "debug up",
-    // JTAG sends no body (unchanged); hostio sends {via: "hostio"}
-    run: (ctx) => runJob("debugUp", { bid }, b.debugVia === "hostio" ? { via: "hostio" } : undefined,
-      (d) => ctx.progress(`${d.phase || "starting"}`), "debug_up"),
+    key: "up", label: "Open session", busyLabel: "Opening...", budgetS: 60, command: "debug up",
+    run: (ctx) => runJob("debugUp", { bid }, undefined, (d) => ctx.progress(`${d.phase || "starting"}`), "debug_up"),
     render: statusLines, onDone: keep,
   };
   const down = {
@@ -213,8 +173,8 @@ export function CommandLines({ lines, panel, testid }) {
 // The gdb line as the rail shows it: the part that matters (its port, "127.0.0.1:3343") on
 // screen, the whole command (what Copy copies: gdb -ex "target extended-remote ...") for the
 // title, screen readers and the tests.
-function GdbLine({ port, st }) {
-  const cmd = gdbCmdWith(port, st);
+function GdbLine({ port }) {
+  const cmd = gdbCmdFor(port);
   return html`<span class="copy-row"><code title=${cmd}>127.0.0.1:${port}</code>
     <span class="sr-only">${cmd}</span><${CopyButton} text=${cmd} label="Copy the gdb command" /></span>`;
 }
@@ -223,14 +183,6 @@ export function DebugCard({ bid }) {
   const b = boardState(bid);
   const p = panelState(bid, PANEL);
   useEffect(() => { loadDebug(bid); }, [bid]);
-  // HM 1.2.1 (preview): the DUT pins' mode decides whether "hostio" can be chosen
-  const [hview, setHview] = useState(null);
-  const [hfail, setHfail] = useState(false);
-  useEffect(() => {
-    if (!ENDPOINTS.hostioGet) { setHfail(true); return; }
-    call("hostioGet", { bid }).then(({ data }) => { setHview(data); setHfail(false); })
-      .catch((e) => { toApiError(e); setHfail(true); });
-  }, [bid]);
   const st = b.debug || { state: "unknown" };
   const live = debugLive(bid);
   const { detect, up, down } = debugSpecs(bid);
@@ -255,8 +207,8 @@ export function DebugCard({ bid }) {
     body = html`<dl class="kv" data-testid="debug-ports">
       ${idcode ? html`<dt>IDCODE</dt><dd>${idcode}</dd>` : null}
       ${cores.length > 1 ? cores.map(([core, gp]) => html`<dt key=${`k${core}`}>gdb ${core}</dt>
-          <dd key=${`v${core}`} data-port=${`gdb-${core}`} data-testid=${`debug-attach-${core}`}><${GdbLine} port=${gp} st=${st} /></dd>`)
-        : cores.length ? html`<dt>gdb</dt><dd data-port="gdb" data-testid="debug-attach"><${GdbLine} port=${cores[0][1]} st=${st} /></dd>`
+          <dd key=${`v${core}`} data-port=${`gdb-${core}`} data-testid=${`debug-attach-${core}`}><${GdbLine} port=${gp} /></dd>`)
+        : cores.length ? html`<dt>gdb</dt><dd data-port="gdb" data-testid="debug-attach"><${GdbLine} port=${cores[0][1]} /></dd>`
         : html`<dt>gdb</dt><dd class="muted small" data-port="gdb">${st.detail || "not forwarded here: Close and Open again"}</dd>`}
       <dt>Ports</dt><dd class="small"><span data-port="telnet">${port("telnet")}</span> · <span data-port="tcl">${port("tcl")}</span></dd>
       ${whereLine}
@@ -270,33 +222,10 @@ export function DebugCard({ bid }) {
       : "Open session starts OpenOCD for the loaded design and gives you the gdb line."}</div>`;
   }
   const lines = p.lines.filter((l) => l.kind !== "progress");
-  const via = live ? (st.via || "jtag") : (b.debugVia || "jtag");
-  const caps = capsOf(st);
-  const why = hostioGate(hview, hfail, st.hostio_design);
-  const pick = (v) => { if (v === "hostio" && why) return; b.debugVia = v; changed(); };
-  const chooser = !live ? html`<div class="seg" role="radiogroup" aria-label="Debug via" data-testid="debug-via">
-      ${["jtag", "hostio"].map((v) => {
-        const off = v === "hostio" && !!why;
-        return html`<button type="button" key=${v} class=${`btn sm ${via === v ? "primary" : "ghost"}`} role="radio"
-          aria-checked=${via === v ? "true" : "false"} aria-disabled=${off ? "true" : undefined} data-via=${v}
-          title=${off ? why : undefined} onClick=${() => pick(v)}>${VIA_LABEL[v]}</button>`;
-      })}</div>
-    ${why ? html`<p class="small muted" data-testid="debug-via-reason">hostio: ${why}</p>` : null}`
-    : html`<div class="small" data-testid="debug-via-live">Via <span class="chip plain" data-via=${via}>${VIA_LABEL[via] || via}</span></div>`;
-  const capRow = (live || via === "hostio") ? html`<div class="row small" data-testid="debug-caps" data-via=${via}>
-      ${CAP_CONTROLS.map(([k, label]) => {
-        const on = (live ? caps : (via === "hostio" ? [] : JTAG_CAPS)).includes(k);
-        return html`<span key=${k} class=${`chip ${on ? "ok" : "plain"}`} data-cap=${k} data-enabled=${on ? "true" : "false"}
-          aria-disabled=${on ? undefined : "true"} title=${on ? undefined : HOSTIO_LIMITS}>${label}</span>`;
-      })}
-      ${(live ? via === "hostio" : via === "hostio") ? html`<span class="small muted" data-testid="debug-caps-reason">${HOSTIO_LIMITS}</span>` : null}
-    </div>` : null;
   return html`<section class="card wb-debug" data-testid="debug-card" aria-label="Debug">
     <div class="card-head"><h2 class="card-title"><${Icon} name="bug" />Debug</h2><span class="spacer"></span>${chip}</div>
     <div class="card-body"><div class="stack tight">
-      ${chooser}
       ${body}
-      ${capRow}
       <div class="row">
         ${live ? html`<${RailButton} bid=${bid} spec=${down} gate=${gates.down} icon="square" />`
           : html`<${RailButton} bid=${bid} spec=${up} gate=${gates.up} variant="primary" icon="play"

@@ -784,14 +784,11 @@ class DemoDebug:
                 hint="load nanosoc, nanosoc_upy or nanosoc_iice first")
         return DAP_IDCODE
 
-    def up(self, session: BoardSession, *, via: str = "jtag") -> DebugStatus:
+    def up(self, session: BoardSession) -> DebugStatus:
         e = self._e
         bid = session.candidate.board_id
         e._enter("debug.up", bid)
         board = e._board(bid)
-        if via == "hostio" and board.kind != "linux":     # HM 1.2.1 (preview): the board's OpenOCD only
-            raise RefusedError("hostio debug runs OpenOCD on the board, over the board's SSH",
-                               hint="claim a Linux board, or use JTAG")
         if board.debug.state == "up":
             raise AlreadyError("the OpenOCD session is already up", hint="close it first")
         on_board = board.kind == "linux"             # DEBUG-ONBOARD: the board runs OpenOCD
@@ -808,19 +805,10 @@ class DemoDebug:
         if on_board:
             # the claim forward's local ends of the board's 3333/3334 (made up: nothing listens)
             cores = ONBOARD_CORES.get(design, ("cpu0",))
-            hostio = via == "hostio"
-            if hostio:
-                from harness_manager.services import debug_onboard as ob
-
-                cores, cfg = cores[:1], ("nanosoc_mps3_hostio4.cfg",)
-                extra = {"via": "hostio", "capabilities": ob.HOSTIO_CAPABILITIES,
-                         "gdb_init": ob.HOSTIO_GDB_INIT}
-            else:
-                extra = {}
             status = DebugStatus(state="up", config=cfg, pid=812, gdb_ports=tuple(
                 base + 7 * i for i in range(len(cores))), cores=cores, where="board",
                 detail="OpenOCD runs on the board; gdb reaches it through the board's SSH "
-                       "(pid 812)", **extra)
+                       "(pid 812)")
         else:
             status = DebugStatus(state="up", gdb_port=base, telnet_port=base + 1111,
                                  tcl_port=base + 3333, config=cfg, pid=40000 + base,
@@ -839,11 +827,6 @@ class DemoDebug:
         self._set(bid, status)
         return status
 
-    def hostio_design(self, session: BoardSession) -> dict | None:
-        """HM 1.2.1: the board launcher's hostio flag for the loaded design (a test sets
-        ``board.hostio_design``; the demo knows none)."""
-        return getattr(self._e._board(session.candidate.board_id), "hostio_design", None)
-
     def status(self, session: BoardSession) -> DebugStatus:
         self._e._enter("debug.status", session.candidate.board_id)
         return self._e._board(session.candidate.board_id).debug
@@ -855,9 +838,7 @@ class DemoDebug:
                  if status.state == "up" else {})
         self._e.bus.publish(Event("debug.state", board_id, {
             "state": status.state, "ports": ports, "where": status.where,
-            "gdb_ports": list(status.gdb_ports), "cores": list(status.cores),
-            "via": status.via, "capabilities": list(status.capabilities),
-            "gdb_init": list(status.gdb_init)}))
+            "gdb_ports": list(status.gdb_ports), "cores": list(status.cores)}))
 
     def _auto_close(self, board_id: str) -> None:
         # T4's rule: the OpenOCD session closes before a swap.

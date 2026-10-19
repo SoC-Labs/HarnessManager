@@ -732,7 +732,7 @@ def test_cli_prints_one_attach_line_per_core_and_where(cli, capsys):
     assert body["status"]["where"] == "board" and body["status"]["gdb_ports"] == [40001, 40002]
     rc, out = run_cli(capsys, "--tsv", "debug", "status", "127.0.0.1")
     row = out.strip().splitlines()[-1].split("\t")
-    assert row[-5:-2] == ["board", "40001;40002", "cpu0;cpu1"]   # then VIA, CAPABILITIES (1.2.1)
+    assert row[-3:] == ["board", "40001;40002", "cpu0;cpu1"]
 
 
 def test_twin_one_core_on_this_pc_keeps_the_single_lines(cli, capsys):

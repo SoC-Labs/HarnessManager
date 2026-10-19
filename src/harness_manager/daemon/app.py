@@ -1224,11 +1224,6 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def debug_up(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         ui2_holder(bid, s, "debug_up", _obj(body))          # ui2 api-hub (G7): 409 HELD
-        # HM 1.2.1 (additive): {"via": "jtag"|"hostio"}, jtag when absent
-        via = _obj(body).get("via", "jtag")
-        if via not in ("jtag", "hostio"):
-            raise UsageError(f"via must be jtag or hostio, not {via!r}",
-                             hint='send {"via": "hostio"}, or no body for JTAG')
         svc = d.engine.debug
         # DEBUG-ONBOARD: the board's own OpenOCD is for the lease holder (as XVC): one view
         # of "held here", the hub API's.
@@ -1238,8 +1233,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "debug session")
             progress("starting", 0, 0)
-            # a JTAG up is called exactly as before (a service without ``via`` is untouched)
-            status = (d.engine.debug.up(s, via=via) if via != "jtag" else d.engine.debug.up(s))
+            status = d.engine.debug.up(s)
             progress(getattr(status, "state", "up"), 0, 0)
             return status          # a "failed" status is a result, as the engine returns it
 
@@ -1579,12 +1573,6 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         # DEBUG-OCD: which OpenOCD this service would run, and whether it has the adapter.
         report = getattr(d.engine.debug, "openocd_report", None)
         extra = {"openocd": report()} if callable(report) else {}
-        # HM 1.2.1 (additive): the loaded design's hostio flag, from the board's launcher
-        ask = getattr(d.engine.debug, "hostio_design", None)
-        if callable(ask) and st.state not in ("up", "starting"):
-            got = ask(board(bid))
-            if got is not None:
-                extra["hostio_design"] = got
         return _JSON(ok(board_id=bid, **_fields(st), **extra))
 
     # -- one board: the bare routes, last ------------------------------------------------------
