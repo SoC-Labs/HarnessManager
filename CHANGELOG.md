@@ -4,7 +4,7 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
-## 1.2.0 (unreleased)
+## 1.2.0 (2026-10-19)
 
 Support for boards that run a mint-4 release (v2.2 and later), and a round of fixes and plainer
 words from workshop preparation. Features marked "mint-4" appear only on those boards; other
