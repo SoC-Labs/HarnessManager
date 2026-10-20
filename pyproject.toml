@@ -17,7 +17,7 @@ readme = "README.md"
 # pyverify is not on PyPI: its wheel is in vendor/ (see vendor/README.md), so every
 # install passes `--find-links vendor` (scripts/install.sh, CI, `make venv`).
 dependencies = [
-    "mps3-pyverify==0.1.0",
+    "mps3-pyverify==2.2.1",
     # harness-manager-daemon + the web UI (Wave 2): all pure pip wheels on Linux/Windows/macOS.
     "fastapi>=0.110",
     "uvicorn>=0.29",
