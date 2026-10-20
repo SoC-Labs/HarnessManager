@@ -667,13 +667,13 @@ def test_twin_the_boards_own_static_is_not_refused(page_factory, daemon, engine)
     expect(by_id(page, "design-refused")).to_have_count(0)
     expect(page.locator('[data-testid="trouble"][data-failing="true"]')).to_have_count(0)
     expect(by_id(page, "bd-continue")).to_be_enabled()
-    # Design's RM kit: the XDC export's zip for the design as it stands
-    with page.expect_download(timeout=T) as dl:
-        by_id(page, "bd-rm-kit").click()
-    assert dl.value.suggested_filename == "minimal_rm-kit.zip"
-    with zipfile.ZipFile(dl.value.path()) as zf:
-        assert any(n.endswith("minimal_ooc.xdc") for n in zf.namelist()), zf.namelist()
-    expect(by_id(page, "bd-rm-kit-saved")).to_contain_text("minimal_rm-kit.zip")
+    # Design's RM kit: the XDC export is for the pin model's default static (0xA5856D30 since
+    # HM 1.2.1), not this board's 0x72BB0A36, so it is refused with that reason; the build
+    # itself is not (above). The zip for a board on the model's static: test_t10_api.
+    by_id(page, "bd-rm-kit").click()
+    expect(by_id(page, "bd-rm-kit-error")).to_contain_text("Refused")
+    expect(by_id(page, "bd-rm-kit-error")).to_contain_text("0xA5856D30")
+    expect(by_id(page, "bd-rm-kit-saved")).to_have_count(0)
     assert page.errors == []
 
 
