@@ -483,7 +483,7 @@ installs the platform's **published** wheel, not a copy kept here.
 
 `pyverify.pin` (repo root) is the one place that names it: the version (the platform release
 version, tag `v<version>`), the sha256, and the url
-`https://github.com/SoC-Labs/MPS3-NanoSoC-Verification-Platform/releases/download/v<version>/mps3_pyverify-<version>-py3-none-any.whl`.
+`https://github.com/SoC-Labs/nanoSoC-Hardware-Prototyping-Platform/releases/download/v<version>/mps3_pyverify-<version>-py3-none-any.whl`.
 `pyproject.toml` depends on exactly that version (`mps3-pyverify==<version>`).
 
 `scripts/install.sh` (and `install.ps1`) take the wheel in this order, and install it only

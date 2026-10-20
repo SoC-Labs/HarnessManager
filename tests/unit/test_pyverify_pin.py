@@ -107,7 +107,7 @@ def test_the_pin_is_well_formed_and_its_url_follows_its_version():
     assert re.fullmatch(r"\d+\.\d+\.\d+", pin["version"])
     assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"])
     assert pin["url"] == (
-        "https://github.com/SoC-Labs/MPS3-NanoSoC-Verification-Platform/releases/download/"
+        "https://github.com/SoC-Labs/nanoSoC-Hardware-Prototyping-Platform/releases/download/"
         f"v{pin['version']}/mps3_pyverify-{pin['version']}-py3-none-any.whl")
 
 

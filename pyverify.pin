@@ -5,4 +5,4 @@
 # PLACEHOLDER until Tue 20 Oct 12:30: version and sha256 are those of the wheel still in vendor/ (0.1.0).
 version=0.1.0
 sha256=ac1865a3dc7dd5c5be81f859bc54a7776ef5408b019fde31845bf9b46c48c9c1
-url=https://github.com/SoC-Labs/MPS3-NanoSoC-Verification-Platform/releases/download/v0.1.0/mps3_pyverify-0.1.0-py3-none-any.whl
+url=https://github.com/SoC-Labs/nanoSoC-Hardware-Prototyping-Platform/releases/download/v0.1.0/mps3_pyverify-0.1.0-py3-none-any.whl

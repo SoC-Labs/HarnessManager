@@ -17,7 +17,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 die() { printf 'pin_pyverify: %s\n' "$*" >&2; exit 2; }
 pin="$here/pyverify.pin" pyproject="$here/pyproject.toml"
-base="https://github.com/SoC-Labs/MPS3-NanoSoC-Verification-Platform/releases/download"
+base="https://github.com/SoC-Labs/nanoSoC-Hardware-Prototyping-Platform/releases/download"
 
 check() {
     local v
