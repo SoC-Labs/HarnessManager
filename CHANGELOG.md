@@ -4,7 +4,7 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
-## 1.2.1 (unreleased)
+## 1.2.1 (2026-10-21)
 
 ### Fixes
 - **Keys typed into a console just opened from the switcher are no longer lost.** While the
@@ -20,8 +20,9 @@ API (docs/API.md says what changed).
 - The XDC export, the RM kit (`xdc rm-kit`) and the pin facts now model the v2.2 static `0xA5856D30` (mint 4) and default to it: a 54-port, 260-bit boundary with `NGPIO` 48 and the 16-bit `hostio` group; its pblock (shape A: 213,456 LUT, 720 RAMB36, 2,160 DSP) and `HD.CLK_SRC` are in the kit (earlier statics keep their 47 ports / 148 bits).
 - `xdc rm-kit`: a wrapper that declares `parameter int NGPIO = 48` is now read at 48 lanes (it was read as 16 whatever it declared, so the kit's own skeleton failed its port check on a v2.2 static).
 - The Checks (`harness-manager checks`, HIL_AUTO) now expect the v2.2 Linux static `0xa5856d30` by default (was `0x44ee76d5`); `--expect-static` still overrides.
+- pyverify 2.2.1 (the platform's v2.2.1 release wheel, sha256 `0347a314…`). The packaged MPS3 OpenOCD configs follow it: the retired SWD configs (`swd_remote_bitbang.cfg`, `swd_cortex_m.cfg`, `nanosoc_qs_swd.cfg`, `swd_over_jtagbb_proxy.py`) are gone; the JTAG configs are unchanged in use.
 
-## 1.2.0 (unreleased)
+## 1.2.0 (2026-10-19)
 
 Support for boards that run a mint-4 release (v2.2 and later), and a round of fixes and plainer
 words from workshop preparation. Features marked "mint-4" appear only on those boards; other
