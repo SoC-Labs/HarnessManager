@@ -8,7 +8,7 @@ the board controller (MCC) and its configuration SD card.
 You get a command, `harness-manager`, and an app window. Both drive the same board
 session, so you can use them at the same time.
 
-Version 1.2.0. Supported on Linux and macOS. Windows is not supported in 1.2.0; it is
+Version 1.2.1. Supported on Linux and macOS. Windows is not supported in 1.2.x; it is
 planned for a later release. This repository is
 private, and its licence is still to be decided.
 
@@ -33,8 +33,8 @@ Linux and macOS:
 git clone git@github.com:SoC-Labs/HarnessManager.git && HarnessManager/scripts/install.sh
 ```
 
-Windows is not supported in 1.2.0; it is planned for a later release. (`scripts/install.ps1`
-is work in progress for that release; 1.2.0 does not ship or support it.)
+Windows is not supported in 1.2.x; it is planned for a later release. (`scripts/install.ps1`
+is work in progress for that release; 1.2.x does not ship or support it.)
 
 The installer makes a private venv, installs Harness Manager into it at tested
 dependency versions, puts the `harness-manager` command on your PATH, and gives it its own
