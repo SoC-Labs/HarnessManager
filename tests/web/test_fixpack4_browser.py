@@ -9,6 +9,7 @@ a board.
 from __future__ import annotations
 
 import getpass
+import re
 import time
 from typing import Any
 
@@ -323,6 +324,55 @@ def test_the_preview_shows_the_last_known_hub_lease_apart_from_this_apps_lock(pa
     expect(lease).to_contain_text("Held by alice@lab-pc-07")
     expect(by_id(page, "preview-lease-at")).to_contain_text("as of ")
     assert page.locator(".preview dt", has_text="Lock").filter(has_not_text="app").count() == 0
+    assert page.errors == []
+
+
+BOARDS_LIST = re.compile(r"/api/v1/boards(\?[^/]*)?$")
+
+
+@HUB
+def test_a_boards_list_asked_before_close_does_not_bring_this_apps_lock_back(page_factory, daemon):
+    # CI 1 Nov (9d26e58): after Close the preview said "held by ... harness-manager-ui" for
+    # longer than the test waited. A GET /boards asked while the board was open (it follows
+    # session.opened) and answered after the Close put the lock back on the row; a later list
+    # never took it away (a free board's row has no "holder", and the merge kept the old one).
+    sim(daemon).behind_hub(BOARD_FIELDED, lease="other")
+    page = page_factory(**APP)
+    rail(page, BOARD_FIELDED).wait_for(timeout=T)
+    stale: list = []
+
+    def hold(route: Any) -> None:
+        if route.request.method != "GET" or stale:
+            route.continue_()
+            return
+        response = route.fetch()
+        row = next((r for r in response.json()["boards"] if r["board_id"] == BOARD_FIELDED), {})
+        if row.get("open") and row.get("holder"):
+            stale.append((route, response))               # held: it lands after the Close
+        else:
+            route.fulfill(response=response)
+
+    page.route(BOARDS_LIST, hold)
+    open_board(page, BOARD_FIELDED)
+    deadline = time.monotonic() + 10                      # (route handlers run in Playwright's
+    while not stale and time.monotonic() < deadline:      # waits, never in time.sleep)
+        page.wait_for_timeout(50)
+    assert stale, "the page did not ask for the boards list while the board was open"
+    page.locator('[data-action="close-board"]').click()
+    by_id(page, "close-confirm").locator('[data-action="close_confirm"]').click()
+    expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)
+    expect(by_id(page, "preview-lock")).to_have_text("free")
+    route, response = stale[0]
+    body = response.json()
+    rows = [r for r in body["boards"] if r["board_id"] == BOARD_FIELDED]
+    assert rows and rows[0].get("open") and rows[0].get("holder")    # really the stale list
+    rows[0]["fp4_stale"] = True
+    route.fulfill(response=response, json=body)
+    page.unroute(BOARDS_LIST)
+    page.wait_for_function(
+        f"() => (window.__harness_managerState().boards[{BOARD_FIELDED!r}] || {{}}).fp4_stale",
+        timeout=T)
+    expect(by_id(page, "preview-lock")).to_have_text("free")
     assert page.errors == []
 
 

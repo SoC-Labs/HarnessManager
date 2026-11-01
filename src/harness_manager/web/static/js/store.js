@@ -500,11 +500,19 @@ function newerHere(bid, asked) {
   return asked !== null && !!at && at >= asked;
 }
 
-function mergeBoards(rows, asked = null) {
+// `listed`: the rows are GET /boards's, where a free board's row has no "holder" (the lock
+// was let go: the row says so). A scan's rows know nothing of locks and keep the holder.
+function mergeBoards(rows, asked = null, listed = false) {
   for (const row of rows) {
     const prev = S.boards[row.board_id] || {};
     const next = { ...prev, ...row };
-    if (newerHere(row.board_id, asked)) next.open = prev.open;
+    if (listed) next.holder = row.holder || null;
+    if (newerHere(row.board_id, asked)) {
+      // a list older than this page's Open/Close keeps the page's own "open" and holder: one
+      // asked while open and answered after Close put this app's lock back (CI 1 Nov)
+      next.open = prev.open;
+      next.holder = prev.holder || null;
+    }
     S.boards[row.board_id] = next;
     if (!S.order.includes(row.board_id)) S.order.push(row.board_id);
   }
@@ -520,7 +528,7 @@ export async function loadBoards() {
     // A board this page knows but the daemon no longer lists stays, marked not open.
     if (!seen.has(bid) && !newerHere(bid, asked)) S.boards[bid] = { ...S.boards[bid], open: false };
   }
-  mergeBoards(rows, asked);
+  mergeBoards(rows, asked, true);
   for (const row of rows) {
     if (row.job) setJob(row.board_id, row.job, null);
     else if (S.board[row.board_id] && S.board[row.board_id].job && row.open
