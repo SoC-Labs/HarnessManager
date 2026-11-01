@@ -4,7 +4,7 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
-## 1.2.1 (2026-10-21)
+## 1.2.1 (2026-11-04)
 
 ### Fixes
 - **Keys typed into a console just opened from the switcher are no longer lost.** While the
