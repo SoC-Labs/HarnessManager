@@ -184,13 +184,19 @@ def test_a_split_snap_is_shown_whole(svc: DisplayService, snap_last: bool) -> No
         anim(p, now)
         snaps.add(crc_valid(p.gram, set(range(300))))
 
+    # Parts 30 ms apart (poll_s; default 5 ms): a SNAP's parts arrive one by one, so a pull
+    # (every 2 ms) can land between two of them on a slow runner too. At 5 ms the twin saw no
+    # tear in 25 pictures on loaded CI runners (20 Oct, 1 Nov: "assert 0 > 0"), most likely a
+    # SNAP's parts presented back to back between two pulls (not reproduced locally).
     with FakeLcdMirror(FakePanel(), animate=animate, max_msg=16384, rate_default=15,
-                       snap_last=snap_last) as fake:
+                       snap_last=snap_last, poll_s=0.03) as fake:
         vm = ViewerModel()
         v = svc.attach(BID, fake.connect, ack=False, rate=15)
         torn = whole = 0
         deadline = time.monotonic() + 30.0
-        while time.monotonic() < deadline and whole + torn < 25:
+        # the twin keeps looking until it sees a tear (a tear is the point; 25 whole pictures
+        # in a row only say this runner was slow); the same 30 s bound
+        while time.monotonic() < deadline and (whole + torn < 25 or (not snap_last and not torn)):
             m = v.next_message()
             if m is None:
                 time.sleep(0.002)
