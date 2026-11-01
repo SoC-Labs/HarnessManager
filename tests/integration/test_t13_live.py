@@ -36,6 +36,7 @@ from tests.fakes.t13_daemon import (
     recv_until,
     run_cli,
     state_dir,
+    wait_for,
     ws_connect,
 )
 from tests.fakes.virtual_board import VirtualMps3
@@ -235,6 +236,17 @@ def test_the_cli_and_a_websocket_client_share_one_board_session(vboard, capsys, 
 # -- back-pressure: drop the oldest, report it, never block the engine ----------------------------------
 
 
+def _on_the_hub(d: LiveDaemon) -> None:
+    """Wait until the events socket just opened is a client of the daemon's event hub.
+
+    The client's handshake completes before the server's handler reaches ``hub.add``; an event
+    published in between goes to nobody (it was published before the subscription). On a slow
+    runner that gap swallowed the first ~1,000 events of a flood, or all 200 of the twin's.
+    """
+    hub = d.app.state.daemon.hub
+    wait_for(lambda: hub.clients >= 1, what="the events socket on the daemon's hub")
+
+
 def _stalled_socket(port: int) -> socket.socket:
     sock = socket.socket()
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
@@ -248,6 +260,7 @@ def test_a_stalled_events_client_loses_the_oldest_events_and_is_told(vboard):
         with LiveDaemon(eng, write_json=False, event_limits=(50, 1 << 20)) as d:
             ws = ws_connect(d.ws_url("/events", topics="t13.*"),
                             sock=_stalled_socket(d.port), max_queue=1)
+            _on_the_hub(d)
             try:
                 n = 20_000
                 pad = "x" * 1000
@@ -279,6 +292,7 @@ def test_negative_twin_a_reading_events_client_loses_nothing(vboard):
     try:
         with LiveDaemon(eng, write_json=False) as d:
             ws = ws_connect(d.ws_url("/events", topics="t13.*"))
+            _on_the_hub(d)
             try:
                 for i in range(200):
                     eng.bus.publish(Event("t13.flood", "b", {"seq": i}))
