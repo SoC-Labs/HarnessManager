@@ -11,7 +11,7 @@ it is planned for a later release. The Windows notes below describe that work in
 - Python 3.10 or newer, or [uv](https://docs.astral.sh/uv/). The installer takes the
   newest Python 3.10+ it finds (`--python` names one). With uv and no such Python, uv
   downloads one, with no root.
-- git, to clone the repository (it is private: ask SoC Labs for access).
+- git, to clone the repository.
 - A network connection to PyPI for the dependencies (FastAPI, uvicorn, websockets,
   cryptography), directly or through a proxy. pyverify comes from the platform's release on
   GitHub (see [Where pyverify comes from](#where-pyverify-comes-from)). With no
@@ -46,7 +46,7 @@ found and prints the line for your distribution.
 About a minute on a fresh machine with the prerequisites, most of it the download:
 
 ```bash
-git clone git@github.com:SoC-Labs/HarnessManager.git   # 1. clone (private: SSH key)
+git clone https://github.com/SoC-Labs/HarnessManager.git   # 1. clone
 HarnessManager/scripts/install.sh                       # 2. install (~20 s; ~5 s with uv)
 harness-manager app --demo                              # 3. the app, with demo boards
 ```
@@ -126,7 +126,7 @@ Examples:
 
 ```bash
 scripts/install.sh --with-serial                                  # this checkout
-scripts/install.sh --from git@github.com:SoC-Labs/HarnessManager.git --ref v1.1.0
+scripts/install.sh --from https://github.com/SoC-Labs/HarnessManager.git --ref v1.2.1
 scripts/install.sh --from dist/harness_manager-0.1.0-py3-none-any.whl
 make install-local INSTALL_ARGS=--with-app                        # the same, from make
 ```
@@ -183,7 +183,7 @@ What a Windows 10 or 11 laptop will need, besides the installer:
 Run the installer from PowerShell (no Administrator):
 
 ```powershell
-git clone git@github.com:SoC-Labs/HarnessManager.git
+git clone https://github.com/SoC-Labs/HarnessManager.git
 powershell -ExecutionPolicy Bypass -File HarnessManager\scripts\install.ps1 -WithSerial
 ```
 

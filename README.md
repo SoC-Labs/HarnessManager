@@ -10,7 +10,7 @@ session, so you can use them at the same time.
 
 Version 1.2.1. Supported on Linux and macOS. Windows is not supported in 1.2.x; it is
 planned for a later release. This repository is
-private, and its licence is still to be decided.
+public; its licence is still to be decided.
 
 ## Install
 
@@ -24,13 +24,12 @@ which fetches a Python for you. On a fresh system:
 | Fedora | `sudo dnf install python3 git` |
 
 [docs/INSTALL.md](docs/INSTALL.md#linux-prerequisites-by-distribution) has the exact
-lines CI tests on each. The repository is private: ask SoC Labs for access, and add an
-SSH key to your GitHub account. Then clone it and run the installer.
+lines CI tests on each. Then clone the repository and run the installer.
 
 Linux and macOS:
 
 ```bash
-git clone git@github.com:SoC-Labs/HarnessManager.git && HarnessManager/scripts/install.sh
+git clone https://github.com/SoC-Labs/HarnessManager.git && HarnessManager/scripts/install.sh
 ```
 
 Windows is not supported in 1.2.x; it is planned for a later release. (`scripts/install.ps1`
@@ -209,4 +208,4 @@ make dist     # sdist and wheel in dist/, with the pyverify wheel
 
 ## Licence
 
-Private to SoC Labs. The licence is still to be decided.
+The licence is still to be decided. Until it is, ask SoC Labs before you reuse or redistribute the code.
