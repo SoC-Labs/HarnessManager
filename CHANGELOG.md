@@ -10,6 +10,9 @@ API (docs/API.md says what changed).
 - **Keys typed into a console just opened from the switcher are no longer lost.** While the
   console is still connecting, keys wait and are sent in order once it is up (Ctrl-C and
   Ctrl-D included); before, the first keys were dropped with only a warning in Activity.
+- **A closed board's preview no longer says this app still holds its lock.** After Close, a
+  board list answered late could put "This app's lock: held by ... harness-manager-ui" back
+  on the preview, and it stayed until the page was reloaded.
 - **Kits for harness 2.2.0 say the static needs no IP licence.** Measured with `report_ip_status`
   (Vivado 2026.1): every IP in the v2.2 static is "Included". It used to say "not checked".
 
