@@ -11,6 +11,7 @@ import shlex
 import shutil
 import sys
 import threading
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ from tests.fakes.cardwriter_fakes import (
     BUNDLE_BOARD,
     CARD_BOARD,
     CARD_SIZE,
+    MAC_SDXC_SIZE,
     MCC,
     NO_LINE_BOARD,
     Rig,
@@ -37,6 +39,8 @@ from tests.fakes.cardwriter_fakes import (
     diskutil_list,
     guard,  # noqa: F401 - the fixture
     lsblk_doc,
+    mac_field_info,
+    mac_field_list,
     old_lsblk,
     slot_image,
     sysfs,
@@ -179,9 +183,100 @@ def test_macos_diskutil_plists_parse_into_card_readers():
 def test_twin_macos_apfs_and_internal_disks_are_excluded():
     by = {d.name: d for d in cw.parse_diskutil(diskutil_list(), diskutil_info)}
     assert "APFS" in cw.exclusion(by["disk5"], cw.DEFAULT_MAX)
-    internal = cw.Disk("disk0", "/dev/disk0", 500_000_000_000, transport="sd", removable=True,
+    internal = cw.Disk("disk0", "/dev/disk0", 500_000_000_000, transport="pci-express",
                        internal=True, platform="darwin")
     assert cw.exclusion(internal, cw.DEFAULT_MAX) == "an internal disk"
+
+
+# --- macOS: a card in the Mac's BUILT-IN SDXC reader (field report, 5 Nov 2026) -----------------
+
+
+def mac_runner(calls: list[list[str]], **kw):
+    """diskutil on the field Mac: ``list ... physical`` (with or without ``external``), ``info``."""
+    def run(argv):
+        argv = list(argv)
+        calls.append(argv)
+        if argv[:3] == ["diskutil", "list", "-plist"]:
+            return 0, mac_field_list(external="external" in argv, **kw), b""
+        if argv[:3] == ["diskutil", "info", "-plist"]:
+            return 0, mac_field_info(argv[3]), b""
+        raise AssertionError(f"unexpected command {argv}")
+    return run
+
+
+def mac_field_disks(**kw) -> dict[str, cw.Disk]:
+    calls: list[list[str]] = []
+    disks = cw.mac_disks(run=mac_runner(calls, **kw))
+    assert calls[0] == ["diskutil", "list", "-plist", "physical"]
+    return {d.name: d for d in disks}
+
+
+def test_mac_disks_lists_every_physical_disk_not_only_external_ones():
+    by = mac_field_disks()
+    assert set(by) == {"disk0", "disk4"}
+
+
+def test_a_card_in_the_macs_built_in_sdxc_reader_is_offered():
+    sd = mac_field_disks()["disk4"]
+    assert (sd.transport, sd.internal, sd.removable, sd.size) == ("sd", True, True, MAC_SDXC_SIZE)
+    assert sd.model == "Built In SDXC Reader" and sd.raw_path == "/dev/rdisk4"
+    assert [(v.fstype, v.label) for v in sd.volumes] == [("vfat", MCC)]
+    assert cw.builtin_sd_card(sd)
+    assert cw.exclusion(sd, cw.DEFAULT_MAX) == ""
+
+
+def test_twin_the_built_in_card_labelled_v2m_mps3_is_not_the_boards_mcc_drive(tmp_path: Path):
+    sd = mac_field_disks()["disk4"]
+    assert MCC in sd.labels
+    # whatever the reader calls itself, a disk on the SD bus is a card, never the MCC's USB drive
+    for model in ("Built In SDXC Reader", "Apple SDXC Reader Media", "V2M-MPS3", "ARM MBED"):
+        assert cw.exclusion(replace(sd, model=model), cw.DEFAULT_MAX) == "", model
+    # the same label on a USB disk the board's controller presents IS the MCC drive
+    mcc = replace(sd, transport="usb", internal=False, model="V2M-MPS3")
+    assert "MCC drive" in cw.exclusion(mcc, cw.DEFAULT_MAX)
+    # listed: files only, never a card image (it is a configuration card)
+    w = cw.CardWriter(state_dir=tmp_path, platform="darwin", enabled=lambda: True,
+                      lister=lambda: [sd], storage_for=lambda root: _Located())
+    card = w.listing().devices[0]
+    assert card.kinds["files"] == ""
+    assert "would erase the board's configuration" in card.kinds["card"]
+
+
+class _Located:
+    def locate(self) -> None:
+        return None
+
+
+def test_the_macs_internal_apfs_disk_is_excluded_with_its_reason(tmp_path: Path):
+    calls: list[list[str]] = []
+    w = cw.CardWriter(state_dir=tmp_path, platform="darwin", enabled=lambda: True,
+                      lister=lambda: cw.mac_disks(run=mac_runner(calls)),
+                      storage_for=lambda root: _Located())
+    doc = w.devices_json()
+    assert [d["path"] for d in doc["devices"]] == ["/dev/disk4"]
+    assert doc["devices"][0]["transport"] == "sd" and doc["devices"][0]["size"] == "8.0 GB"
+    why = {e["name"]: e["why"] for e in doc["excluded"]}
+    assert why == {"disk0": "holds a macOS volume (APFS/HFS), not a card"}
+
+
+def test_twin_an_internal_fixed_disk_on_another_bus_is_still_excluded():
+    disk2 = mac_field_disks(pci_disk=True)["disk2"]
+    assert (disk2.transport, disk2.internal, disk2.removable) == ("pci-express", True, False)
+    assert [v.fstype for v in disk2.volumes] == ["vfat"]          # FAT, still not a card
+    assert cw.exclusion(disk2, cw.DEFAULT_MAX) == "an internal disk"
+    fabric = cw.Disk("disk1", "/dev/disk1", 32_000_000_000, transport="apple fabric",
+                     internal=True, platform="darwin")
+    assert cw.exclusion(fabric, cw.DEFAULT_MAX) == "an internal disk"
+    # internal on the SD bus but neither removable nor ejectable: not the built-in reader
+    fixed_sd = cw.Disk("disk3", "/dev/disk3", 32_000_000_000, transport="sd", internal=True,
+                       platform="darwin")
+    assert cw.exclusion(fixed_sd, cw.DEFAULT_MAX) == "an internal disk"
+
+
+def test_an_empty_built_in_reader_says_no_card():
+    empty = mac_field_disks(empty_reader=True)["disk7"]
+    assert (empty.transport, empty.internal, empty.size) == ("sd", True, 0)
+    assert cw.exclusion(empty, cw.DEFAULT_MAX) == "no card in this reader"
 
 
 def test_a_listed_card_carries_the_contract_fields(rig: Rig):

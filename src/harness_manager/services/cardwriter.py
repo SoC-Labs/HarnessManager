@@ -29,9 +29,10 @@ Safety rails (code, not docs):
 - **Only card readers are listed.** Whole, removable or hotplug disks on a USB or SD/MMC
   transport. Excluded, each with its reason: any disk holding a mounted ``/``, ``/boot``,
   ``/home``, ``/usr``, ``/var`` or swap; non-removable disks; loop, zram, optical; an
-  internal eMMC; the board's own MCC drive (a ``V2M-MPS3`` volume on a disk the board's
-  controller presents: vendor/model ARM, V2M, MPS, MBED, DAPLINK; that is the Debug USB
-  door, never raw-written) and its DAPLink drive (``MBED*``); anything above the size cap
+  internal eMMC; an internal disk (macOS ``Internal``), except a removable card on the SD bus
+  (a Mac's built-in SDXC reader); the board's own MCC drive (a ``V2M-MPS3`` volume on a USB
+  disk the board's controller presents: vendor/model ARM, V2M, MPS, MBED, DAPLINK; that is
+  the Debug USB door, never raw-written; a disk on the SD/MMC bus is never one) and its DAPLink drive (``MBED*``); anything above the size cap
   (``bringup.sd_flash_max``, 256 GB); an empty reader. A card whose volume is labelled
   ``V2M-MPS3`` in a real card reader is listed for ``files`` only: a card image would erase
   the board's configuration.
@@ -432,7 +433,11 @@ def _plist(data: bytes) -> dict[str, Any]:
 
 
 def parse_diskutil(list_plist: bytes, info: Callable[[str], bytes]) -> list[Disk]:
-    """``diskutil list -plist external physical`` plus ``diskutil info -plist`` per disk."""
+    """``diskutil list -plist physical`` plus ``diskutil info -plist`` per disk.
+
+    Every physical disk, internal ones too: a Mac's built-in SDXC reader is on an internal
+    bus (``Internal`` true), so ``external`` alone never lists its card. ``exclusion`` decides.
+    """
     doc = _plist(list_plist)
     disks: list[Disk] = []
     for entry in doc.get("AllDisksAndPartitions") or []:
@@ -484,7 +489,8 @@ def _mac_fs(fs: str) -> str:
 
 def mac_disks(run: Runner | None = None) -> list[Disk]:
     run = run or run_command
-    rc, out, err = run(["diskutil", "list", "-plist", "external", "physical"])
+    # not "external physical": the built-in SDXC reader's card is internal (exclusion decides)
+    rc, out, err = run(["diskutil", "list", "-plist", "physical"])
     if rc != 0:
         raise UnavailableError(CAPABILITY, f"diskutil failed: "
                                            f"{err.decode(errors='replace').strip()}")
@@ -600,6 +606,7 @@ def windows_disks(run: Runner | None = None) -> list[Disk]:
 FAT_TYPES = ("vfat", "msdos", "fat", "fat16", "fat32")
 SYSTEM_MOUNTS = ("/", "/home", "/usr", "/var")
 CARD_TRANSPORTS = ("usb", "mmc", "sd")
+SD_BUSES = ("mmc", "sd")        # a card reader's own bus: never a board controller's USB drive
 MCC_LABEL = "V2M-MPS3"          # harness_manager_mps3.constants.MSD_VOLUME_LABEL
 #: The board-controller side of a Debug USB: the MCC's drive and the CMSIS-DAP (DAPLink)'s.
 MCC_DEVICE = re.compile(r"\b(arm|v2m|mps[23]?|mbed|daplink|keil)\b", re.IGNORECASE)
@@ -616,6 +623,12 @@ def system_mount(mount: str) -> str:
     if m.startswith("/System/Volumes") or m == "/private/var/vm":   # macOS's system volumes
         return m
     return ""
+
+
+def builtin_sd_card(disk: Disk) -> bool:
+    """A card in a reader on the SD bus that the OS calls internal: a Mac's built-in SDXC reader
+    (``BusProtocol`` Secure Digital, ``Internal`` true, ``Removable``/``Ejectable`` true)."""
+    return disk.transport == "sd" and (disk.removable or disk.hotplug)
 
 
 def exclusion(disk: Disk, cap: int) -> str:
@@ -636,7 +649,7 @@ def exclusion(disk: Disk, cap: int) -> str:
         return f"holds this computer's {', '.join(system)}: the system disk"
     if any(v.fstype in ("Apple_APFS", "Apple_HFS", "Apple_Boot") for v in disk.volumes):
         return "holds a macOS volume (APFS/HFS), not a card"
-    if disk.internal:
+    if disk.internal and not builtin_sd_card(disk):
         return "an internal disk"
     if disk.transport == "mmc" and disk.mmc_type and disk.mmc_type.upper() != "SD":
         return f"an internal eMMC ({disk.mmc_type}), not an SD card"
@@ -650,10 +663,13 @@ def exclusion(disk: Disk, cap: int) -> str:
     who = " ".join((disk.vendor, disk.model)).replace("_", " ")
     if any(lb.startswith(DAPLINK_LABELS) for lb in labels):
         return "the board's CMSIS-DAP (DAPLink) drive, not a card"
-    if MCC_LABEL in labels and MCC_DEVICE.search(who):
+    # the board's controllers are USB drives: a disk on the SD/MMC bus is a card in a reader
+    # (a V2M-MPS3 one is listed for files only), whatever its reader's name says
+    controller = disk.transport not in SD_BUSES and MCC_DEVICE.search(who)
+    if MCC_LABEL in labels and controller:
         return ("the MPS3's own MCC drive over the Debug USB: write it with the board's Debug "
                 "USB door (Bring-up), never raw")
-    if MCC_DEVICE.search(who):
+    if controller:
         return "a board controller's drive (Debug USB), not a card reader"
     if disk.size <= 0:
         return "no card in this reader"

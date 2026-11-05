@@ -161,6 +161,68 @@ def diskutil_info(ident: str) -> bytes:
     return plistlib.dumps(DISKUTIL_INFO.get(ident, {}))
 
 
+#: The field report (5 Nov 2026, macOS 26.5.2): a card in an Apple Silicon Mac's BUILT-IN SDXC
+#: reader. diskutil calls the reader internal (``Internal`` true), so ``list external physical``
+#: is empty and ``list physical`` is [disk0, disk4]. disk2 (an internal fixed disk on PCI) and
+#: disk7 (the built-in reader with no card) are this fixture's additions.
+MAC_SDXC_SIZE = 7_990_149_120
+MAC_FIELD_INFO = {
+    "disk0": {"DeviceIdentifier": "disk0", "DeviceNode": "/dev/disk0", "MediaName":
+              "APPLE SSD AP0512Z", "IORegistryEntryName": "APPLE SSD AP0512Z Media",
+              "BusProtocol": "Apple Fabric", "Internal": True, "Removable": False,
+              "RemovableMedia": False, "Ejectable": False, "TotalSize": 500_277_790_720,
+              "WholeDisk": True, "VirtualOrPhysical": "Physical"},
+    "disk2": {"DeviceIdentifier": "disk2", "DeviceNode": "/dev/disk2", "MediaName":
+              "Generic NVMe", "BusProtocol": "PCI-Express", "Internal": True,
+              "Removable": False, "RemovableMedia": False, "Ejectable": False,
+              "TotalSize": 128_035_676_160, "WholeDisk": True, "VirtualOrPhysical": "Physical"},
+    "disk4": {"DeviceIdentifier": "disk4", "DeviceNode": "/dev/disk4", "MediaName":
+              "Built In SDXC Reader", "IORegistryEntryName": "Apple SDXC Reader Media",
+              "BusProtocol": "Secure Digital", "Internal": True, "Removable": True,
+              "RemovableMedia": True, "Ejectable": True, "TotalSize": MAC_SDXC_SIZE,
+              "WholeDisk": True, "VirtualOrPhysical": "Physical"},
+    "disk4s1": {"DeviceIdentifier": "disk4s1", "FilesystemType": "msdos",
+                "MountPoint": "/Volumes/V2M-MPS3", "VolumeName": MCC},
+    "disk7": {"DeviceIdentifier": "disk7", "DeviceNode": "/dev/disk7", "MediaName":
+              "Built In SDXC Reader", "BusProtocol": "Secure Digital", "Internal": True,
+              "Removable": True, "RemovableMedia": True, "Ejectable": True, "TotalSize": 0,
+              "WholeDisk": True, "VirtualOrPhysical": "Physical"},
+}
+
+
+def mac_field_list(*, external: bool = False, empty_reader: bool = False,
+                   pci_disk: bool = False) -> bytes:
+    """``diskutil list -plist physical`` on the field Mac (``external``: with ``external``,
+    which lists none of its disks)."""
+    entries = [] if external else [
+        {"DeviceIdentifier": "disk0", "Size": 500_277_790_720, "Content": "GUID_partition_scheme",
+         "Partitions": [
+             {"DeviceIdentifier": "disk0s1", "Size": 524_288_000, "Content": "Apple_APFS_ISC"},
+             {"DeviceIdentifier": "disk0s2", "Size": 494_384_795_648, "Content": "Apple_APFS"},
+             {"DeviceIdentifier": "disk0s3", "Size": 5_368_664_064,
+              "Content": "Apple_APFS_Recovery"}]},
+        {"DeviceIdentifier": "disk4", "Size": MAC_SDXC_SIZE, "Content": "FDisk_partition_scheme",
+         "Partitions": [{"DeviceIdentifier": "disk4s1", "Size": MAC_SDXC_SIZE - 4_194_304,
+                         "Content": "DOS_FAT_32", "VolumeName": MCC,
+                         "MountPoint": "/Volumes/V2M-MPS3", "VolumeUUID": "7E2F-11A0"}]},
+    ]
+    if pci_disk and not external:
+        entries.append({"DeviceIdentifier": "disk2", "Size": 128_035_676_160,
+                        "Content": "FDisk_partition_scheme",
+                        "Partitions": [{"DeviceIdentifier": "disk2s1",
+                                        "Size": 128_000_000_000, "Content": "DOS_FAT_32",
+                                        "VolumeName": "DATA"}]})
+    if empty_reader and not external:
+        entries.append({"DeviceIdentifier": "disk7", "Size": 0, "Content": ""})
+    whole = [e["DeviceIdentifier"] for e in entries]
+    return plistlib.dumps({"AllDisks": whole, "WholeDisks": whole,
+                           "AllDisksAndPartitions": entries})
+
+
+def mac_field_info(ident: str) -> bytes:
+    return plistlib.dumps(MAC_FIELD_INFO.get(ident, {}))
+
+
 # --- S0LB images ------------------------------------------------------------------------------
 
 
